@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WatchBridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>WatchBridge</h1>
+        <p>Netflix → Simkl</p>
+      </div>
+      <span id="statusBadge" class="badge">Idle</span>
+    </header>
+
+    <section>
+      <h2>Netflix provider</h2>
+      <div class="row">
+        <div>
+          <strong>Site access</strong>
+          <small id="netflixPermissionText">Checking…</small>
+        </div>
+        <button id="enableNetflix" class="primary">Enable Netflix</button>
+      </div>
+      <div class="row compact">
+        <label for="threshold">Watched threshold</label>
+        <div><input id="threshold" type="number" min="1" max="100" value="70"> %</div>
+      </div>
+      <div class="actions">
+        <button id="disableNetflix">Disable provider</button>
+        <button id="revokeNetflix" class="danger">Revoke site access</button>
+      </div>
+      <p class="hint">Enable Netflix requests <code>https://www.netflix.com/*</code> directly from this click. No hidden popup or pre-request await.</p>
+    </section>
+
+    <section>
+      <h2>Simkl target</h2>
+      <div id="simklDisconnected">
+        <label>Client ID<input id="clientId" autocomplete="off" spellcheck="false"></label>
+        <label>Client Secret<input id="clientSecret" type="password" autocomplete="off" spellcheck="false"></label>
+        <button id="connectSimkl" class="primary full">Connect Simkl</button>
+        <p class="hint">Register a personal Simkl developer app and use this exact redirect URI:</p>
+        <code id="redirectUri" class="codeblock"></code>
+        <p class="hint">The client secret is kept only in <code>chrome.storage.session</code> during OAuth and deleted after token exchange.</p>
+      </div>
+      <div id="simklConnected" hidden>
+        <div>
+          <div><strong>Connected</strong><small>OAuth granted</small></div>
+          <button id="disconnectSimkl" class="danger">Disconnect</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sync</h2>
+      <button id="syncNow" class="primary full">Sync now</button>
+      <div class="stats" id="stats"></div>
+      <div class="row compact">
+        <label for="interval">Auto sync</label>
+        <div><input id="interval" type="number" min="1" value="30"> min</div>
+      </div>
+      <details>
+        <summary>Advanced</summary>
+        <button id="resetCheckpoint" class="danger full">Reset history checkpoint</button>
+        <p class="hint">Next sync re-reads the full Netflix history. Simkl normally merges duplicates, but use this only when needed.</p>
+      </details>
+    </section>
+
+    <section>
+      <div class="sectionTitle">
+        <h2>Log</h2>
+        <button id="clearLogs" class="textButton">Clear</button>
+      </div>
+      <div id="logs" class="logs"></div>
+    </section>
+
+    <footer id="footer"></footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
