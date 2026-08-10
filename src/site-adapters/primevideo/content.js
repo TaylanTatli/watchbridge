@@ -10,7 +10,8 @@
   }
 
   function cardElement(anchor) {
-    return anchor.closest('article[data-testid="card"], [data-testid="card"][data-card-title]') || anchor;
+    const card = anchor.closest('article[data-testid="card"], [data-testid="card"][data-card-title]');
+    return card?.closest('li[data-index]') || card || anchor;
   }
 
   function scan() {
@@ -18,8 +19,8 @@
     for (const anchor of document.querySelectorAll('a[href*="/detail/"]')) {
       const identity = identityFromHref(anchor.getAttribute('href'));
       if (!identity) continue;
-      // Prime keeps the detail link and packshot as siblings inside its stable
-      // card container, so styling the link itself cannot reach the image.
+      // Prime replaces the inner article during hover expansion. The carousel
+      // item survives that transition and still contains the linked artwork.
       cards.push({ ...identity, element: cardElement(anchor) });
     }
     return cards;

@@ -76,6 +76,24 @@ test('debounced mutation activity does not spam lookups and SPA cards are discov
   assert.equal(cards[1].element.getAttribute('data-watchbridge-state'), 'watched');
 });
 
+test('watch state is applied to replacement cards created during an async lookup', async () => {
+  const original = element();
+  const replacement = element();
+  let activeElement = original;
+  const controller = createController({
+    provider: 'primevideo',
+    scan: () => [{ id: 'DETAIL', kind: 'title', element: activeElement }],
+    sendMessage: async () => {
+      activeElement = replacement;
+      return { ok: true, connected: true, states: { 'DETAIL:title': true } };
+    },
+    documentRef: { body: {}, querySelectorAll: () => [activeElement] },
+    MutationObserverImpl: FakeObserver
+  });
+  await controller.refresh();
+  assert.equal(replacement.getAttribute('data-watchbridge-state'), 'watched');
+});
+
 test('disabling decoration removes all WatchBridge visual state', async () => {
   const watched = element();
   watched.setAttribute('data-watchbridge-state', 'watched');
@@ -107,12 +125,16 @@ test('Netflix, Crunchyroll, and Prime Video adapters extract only stable URL ide
     id: '0N0F0I1VSVSFT6K6MIE9K5XIRB', kind: 'title'
   });
   assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search/ref=atv_nb_sr'), null);
-  const primeCard = element();
+  const primeItem = element();
+  const primeCard = { closest(selector) {
+    assert.equal(selector, 'li[data-index]');
+    return primeItem;
+  } };
   const primeAnchor = { closest(selector) {
     assert.equal(selector, 'article[data-testid="card"], [data-testid="card"][data-card-title]');
     return primeCard;
   } };
-  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.cardElement(primeAnchor), primeCard);
+  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.cardElement(primeAnchor), primeItem);
 });
 
 test('decorator CSS fades watched art and hover restores opacity', async () => {

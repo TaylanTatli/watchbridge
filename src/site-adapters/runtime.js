@@ -59,7 +59,10 @@
           const key = `${card.id}:${card.kind}`;
           cache.set(key, Boolean(response.states?.[key]));
         }
-        apply(cards);
+        // The site can replace card nodes while the background lookup is in
+        // flight (Prime does this during hover expansion). Re-scan so the new
+        // state is applied to the currently connected elements.
+        apply(uniqueCards(scan()));
       } finally {
         inFlight = false;
         if (rerun) {
