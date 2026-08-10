@@ -30,6 +30,14 @@ button.full { width: 100%; margin-top: 8px; }
 .providerUpdate { border: 1px solid #715f35; background: #282216; border-radius: 7px; padding: 10px; }
 .providerUpdate small { color: #d1bd8d; line-height: 1.4; }
 .provider h3 { font-size: 13px; margin: 0; }
+.providerHeader { min-height: 42px; }
+.providerExpander { display: flex; align-items: center; min-width: 0; flex: 1; gap: 7px; padding: 4px 0; border: 0; background: transparent; text-align: left; }
+.providerExpander:hover { background: transparent; }
+.providerExpander:focus-visible { outline: 1px solid #777; outline-offset: 3px; }
+.providerCaret { flex: 0 0 10px; color: #999; font-size: 12px; }
+.providerHeading { min-width: 0; }
+.providerHeading strong { display: block; font-size: 13px; }
+.providerDetails[hidden] { display: none; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #bbb; font-size: 12px; margin-top: 9px; }
 .toggle input { width: auto; margin: 0; }
 .profileRow { display: flex; align-items: end; gap: 6px; margin-top: 8px; }

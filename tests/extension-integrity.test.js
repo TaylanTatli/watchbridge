@@ -55,6 +55,14 @@ test('popup errors use an inline readable notice instead of clipped browser aler
   assert.match(html, /id="notice"[^>]*aria-live="polite"/);
 });
 
+test('provider cards keep advanced controls collapsed without losing polling state', async () => {
+  const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
+  assert.match(source, /const expandedProviders = new Set\(\)/);
+  assert.match(source, /data-action="expand"[^>]*aria-expanded/);
+  assert.match(source, /class="providerDetails"[^>]*\$\{expanded \? '' : 'hidden'\}/);
+  assert.match(source, /expandedProviders\.add\(providerId\)/);
+});
+
 test('every popup element referenced by ID exists in the HTML', async () => {
   const [source, html] = await Promise.all([
     readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8'),

@@ -5,6 +5,7 @@ const $ = id => document.getElementById(id);
 let state = null;
 let pollTimer = null;
 let authDraftHydrated = false;
+const expandedProviders = new Set();
 
 function send(message) {
   return new Promise(resolve => {
@@ -62,22 +63,41 @@ function providerMarkup(provider) {
     ? `<label class="toggle"><span>Dim watched titles</span><input data-provider="${escapeHtml(provider.id)}" data-action="dim" type="checkbox" ${config.dimWatched ? 'checked' : ''}></label>`
     : '';
   const origins = escapeHtml(JSON.stringify(provider.permissionOrigins || [provider.permissionOrigin]));
+  const expanded = expandedProviders.has(provider.id);
+  const detailsId = `provider-details-${escapeHtml(provider.id)}`;
   return `<div class="provider" data-provider-card="${escapeHtml(provider.id)}">
-    <div class="row">
-      <div><h3>${escapeHtml(provider.label)}</h3><small>${escapeHtml(permissionText)}</small></div>
+    <div class="row providerHeader">
+      <button class="providerExpander" data-provider="${escapeHtml(provider.id)}" data-action="expand" aria-expanded="${expanded}" aria-controls="${detailsId}">
+        <span class="providerCaret" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+        <span class="providerHeading"><strong>${escapeHtml(provider.label)}</strong><small>${escapeHtml(permissionText)}</small></span>
+      </button>
       <button class="primary" data-provider="${escapeHtml(provider.id)}" data-origins="${origins}" data-label="${escapeHtml(provider.label)}" data-action="enable" ${provider.permissionGranted && config.enabled ? 'disabled' : ''}>${provider.permissionGranted && config.enabled ? 'Enabled' : `Enable ${escapeHtml(provider.label)}`}</button>
     </div>
-    ${threshold}
-    ${decoration}
-    ${profile}
-    <div class="actions">
-      <button data-provider="${escapeHtml(provider.id)}" data-action="disable" ${config.enabled ? '' : 'disabled'}>Disable provider</button>
-      <button class="danger" data-provider="${escapeHtml(provider.id)}" data-origins="${origins}" data-action="revoke" ${provider.permissionGranted ? '' : 'disabled'}>Revoke site access</button>
+    <div class="providerDetails" id="${detailsId}" ${expanded ? '' : 'hidden'}>
+      ${threshold}
+      ${decoration}
+      ${profile}
+      <div class="actions">
+        <button data-provider="${escapeHtml(provider.id)}" data-action="disable" ${config.enabled ? '' : 'disabled'}>Disable provider</button>
+        <button class="danger" data-provider="${escapeHtml(provider.id)}" data-origins="${origins}" data-action="revoke" ${provider.permissionGranted ? '' : 'disabled'}>Revoke site access</button>
+      </div>
     </div>
   </div>`;
 }
 
 function bindProviderControls() {
+  for (const button of document.querySelectorAll('[data-action="expand"]')) {
+    button.addEventListener('click', () => {
+      const providerId = button.dataset.provider;
+      const expanded = !expandedProviders.has(providerId);
+      if (expanded) expandedProviders.add(providerId); else expandedProviders.delete(providerId);
+      button.setAttribute('aria-expanded', String(expanded));
+      button.querySelector('.providerCaret').textContent = expanded ? '▾' : '▸';
+      const details = document.getElementById(`provider-details-${providerId}`);
+      if (details) details.hidden = !expanded;
+    });
+  }
+
   for (const button of document.querySelectorAll('[data-action="enable"]')) {
     const providerId = button.dataset.provider;
     const origins = JSON.parse(button.dataset.origins);
