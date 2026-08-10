@@ -100,7 +100,7 @@ Running **Sync now** repeatedly does not blindly enqueue the same historical eve
 
 ### Dim watched titles
 
-Enable **Dim watched titles** for a provider to fade completed media cards. Images use `opacity: 0.25` and return to full opacity on hover.
+Enable **Dim watched titles** for a provider to fade completed media cards. Images use `opacity: 0.25` with a grayscale filter, then return to full color and opacity on hover.
 
 Site decorators are registered dynamically only when:
 

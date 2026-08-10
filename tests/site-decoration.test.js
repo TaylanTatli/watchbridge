@@ -107,8 +107,10 @@ test('decorator CSS fades watched art and hover restores opacity', async () => {
   for (const file of ['netflix/content.css', 'crunchyroll/content.css']) {
     const css = await readFile(new URL(`../src/site-adapters/${file}`, import.meta.url), 'utf8');
     assert.match(css, /opacity:\s*0\.25/);
+    assert.match(css, /filter:\s*grayscale\(1\)/);
     assert.match(css, /:hover img\s*\{\s*opacity:\s*1/);
-    assert.doesNotMatch(css, /grayscale|!important/);
+    assert.match(css, /:hover img\s*\{[^}]*filter:\s*grayscale\(0\)/s);
+    assert.doesNotMatch(css, /!important/);
   }
 });
 
