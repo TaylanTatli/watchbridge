@@ -73,7 +73,10 @@ Providers emit a target-neutral event with this contract. Optional fields are po
   watchedAtMs: number | null,
   progress: number | null,
   ids: { netflix?, simkl?, imdb?, tmdb?, tvdb?, mal? },
-  metadata: {}
+  metadata: {
+    watchedAtUnit: 'unix_seconds',
+    episodeNumbering: 'season_episode'
+  }
 }
 ```
 
@@ -88,12 +91,14 @@ The first Simkl write sends every stable identifier available on the normalized 
 1. Looks up provider/external IDs in strength order; it does not translate or fuzzy-match localized titles.
 2. Accepts only one compatible Simkl catalog result.
 3. For an episode, also requires real season and episode numbers supplied by Netflix.
-4. Retries with the canonical Simkl ID and stable episode coordinates.
+4. Retries with the canonical Simkl ID and stable episode coordinates. Resolved anime uses Simkl's `use_tvdb_anime_seasons` mode because Netflix coordinates are per-season.
 5. Stores a structured unmatched record when any confidence check fails.
 
 Netflix ID lookup is documented by Simkl as beta. Therefore an entry such as `Kahramanlık Akademim` behaves in one of two explicit ways: if the episode or parent Netflix ID resolves uniquely and Netflix supplied episode coordinates, WatchBridge retries using the returned canonical Simkl ID; otherwise it remains unmatched with attempted strategies and the final reason. The Turkish title is never used to guess the English title.
 
 Detailed unmatched records include the source, source ID, localized title, series/episode titles, Netflix date, available IDs, season/episode coordinates, attempted resolution strategies, and final reason. The popup log shows only a concise `[Resolver]` message.
+
+Provider-native watch timestamps remain unchanged for deterministic event identity. The Simkl target converts them to the API's required ISO-8601 `watched_at` representation only while constructing the outgoing payload.
 
 API references used for this behavior:
 

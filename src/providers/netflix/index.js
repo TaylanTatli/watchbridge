@@ -80,6 +80,8 @@ function normalize(item, progress) {
     episode: positiveInteger(item.episodeNumber ?? progress.episode),
     ids: { netflix: sourceId },
     metadata: {
+      watchedAtUnit: 'unix_seconds',
+      episodeNumbering: isMovie ? null : 'season_episode',
       netflix: {
         seriesId: item.series ? String(item.series) : '',
         localizedTitle: item.title || item.seriesTitle || ''

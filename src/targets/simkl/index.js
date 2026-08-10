@@ -4,12 +4,35 @@ import { resolveWatchEvent } from './resolver.js';
 
 const API = 'https://api.simkl.com';
 
+export function toSimklWatchedAt(event) {
+  const value = event?.watchedAt;
+  let date;
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('WatchEvent watchedAt must be a finite timestamp.');
+    const unit = event.metadata?.watchedAtUnit;
+    if (unit && unit !== 'unix_seconds' && unit !== 'unix_milliseconds') {
+      throw new Error(`Unsupported WatchEvent watchedAt unit: ${unit}`);
+    }
+    // Legacy queued Netflix events predate watchedAtUnit and store Unix seconds.
+    date = new Date(unit === 'unix_milliseconds' ? value : value * 1000);
+  } else if (typeof value === 'string' && value.trim()) {
+    date = new Date(value);
+  } else {
+    throw new Error('WatchEvent watchedAt is required for Simkl history.');
+  }
+
+  if (!Number.isFinite(date.getTime())) throw new Error('WatchEvent watchedAt is not a valid timestamp.');
+  return date.toISOString();
+}
+
 export function toPayload(event, identity = null) {
   const ids = normalizeIds(identity?.ids || event.ids || { netflix: event.sourceId });
+  const watchedAt = toSimklWatchedAt(event);
   if (event.type === 'movie') {
     return {
       movies: [{
-        watched_at: event.watchedAt,
+        watched_at: watchedAt,
         country: event.country || '',
         ids
       }]
@@ -17,20 +40,25 @@ export function toPayload(event, identity = null) {
   }
 
   if (identity?.ids?.simkl && event.season && event.episode) {
-    return {
-      shows: [{
-        ids,
-        seasons: [{
-          number: event.season,
-          episodes: [{ number: event.episode, watched_at: event.watchedAt }]
-        }]
+    if (identity.type === 'anime' && identity.episodeNumbering !== 'season_episode') {
+      throw new Error('Resolved anime requires an explicit supported episode numbering scheme.');
+    }
+    const show = {
+      ids,
+      seasons: [{
+        number: event.season,
+        episodes: [{ number: event.episode, watched_at: watchedAt }]
       }]
+    };
+    if (identity.type === 'anime') show.use_tvdb_anime_seasons = true;
+    return {
+      shows: [show]
     };
   }
 
   return {
     episodes: [{
-      watched_at: event.watchedAt,
+      watched_at: watchedAt,
       title_series: event.seriesTitle || '',
       title_episode: event.episodeTitle || event.title || '',
       country: event.country || '',

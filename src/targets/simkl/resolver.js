@@ -45,11 +45,19 @@ function compatibleType(event, candidate) {
   return candidate.type === 'tv' || candidate.type === 'anime';
 }
 
+function identityRejection(event, candidate) {
+  if (!compatibleType(event, candidate)) return 'type_mismatch';
+  if (event.type === 'episode' && (!event.season || !event.episode)) return 'missing_episode_coordinates';
+  if (candidate.type === 'anime' && event.metadata?.episodeNumbering !== 'season_episode') {
+    return 'unsupported_episode_numbering';
+  }
+  return '';
+}
+
 export function selectResolvedIdentity(event, candidate, strategy) {
   const simkl = Number(candidate?.ids?.simkl ?? candidate?.ids?.simkl_id);
   if (!Number.isSafeInteger(simkl) || simkl <= 0) return null;
-  if (!compatibleType(event, candidate)) return null;
-  if (event.type === 'episode' && (!event.season || !event.episode)) return null;
+  if (identityRejection(event, candidate)) return null;
 
   return {
     type: candidate.type,
@@ -57,6 +65,7 @@ export function selectResolvedIdentity(event, candidate, strategy) {
     year: Number(candidate.year) || null,
     season: event.season,
     episode: event.episode,
+    episodeNumbering: event.metadata?.episodeNumbering || null,
     ids: { simkl },
     strategy
   };
@@ -99,7 +108,7 @@ export async function resolveWatchEvent(event, credentials, options = {}) {
     if (!identity) {
       attempts.push({
         strategy,
-        outcome: compatibleType(event, results[0]) ? 'missing_episode_coordinates' : 'type_mismatch',
+        outcome: identityRejection(event, results[0]) || 'invalid_canonical_identity',
         id: candidate.value,
         resolvedType: results[0]?.type || ''
       });
