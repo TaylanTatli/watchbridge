@@ -1,0 +1,8 @@
+[data-watchbridge-state="watched"] img {
+  opacity: 0.58;
+  transition: opacity 160ms ease;
+}
+
+[data-watchbridge-state="watched"]:hover img {
+  opacity: 1;
+}

@@ -11,29 +11,15 @@
     <header>
       <div>
         <h1>WatchBridge</h1>
-        <p>Netflix → Simkl</p>
+        <p>Streaming providers → Simkl</p>
       </div>
       <span id="statusBadge" class="badge">Idle</span>
     </header>
 
     <section>
-      <h2>Netflix provider</h2>
-      <div class="row">
-        <div>
-          <strong>Site access</strong>
-          <small id="netflixPermissionText">Checking…</small>
-        </div>
-        <button id="enableNetflix" class="primary">Enable Netflix</button>
-      </div>
-      <div class="row compact">
-        <label for="threshold">Watched threshold</label>
-        <div><input id="threshold" type="number" min="1" max="100" value="70"> %</div>
-      </div>
-      <div class="actions">
-        <button id="disableNetflix">Disable provider</button>
-        <button id="revokeNetflix" class="danger">Revoke site access</button>
-      </div>
-      <p class="hint">Enable Netflix requests <code>https://www.netflix.com/*</code> directly from this click. No hidden popup or pre-request await.</p>
+      <h2>Providers</h2>
+      <div id="providers"><small>Checking provider access…</small></div>
+      <p class="hint">Enabling a provider requests only that site's optional access, directly from the click. No hidden popup or pre-request await.</p>
     </section>
 
     <section>
@@ -65,7 +51,7 @@
       <details>
         <summary>Advanced</summary>
         <button id="resetCheckpoint" class="danger full">Reset history checkpoint</button>
-        <p class="hint">Next sync re-reads Netflix history. Successful WatchBridge event keys remain stored, so known events are not blindly re-queued.</p>
+        <p class="hint">Next sync re-reads enabled provider histories. Successful WatchBridge event keys remain stored, so known events are not blindly re-queued.</p>
       </details>
     </section>
 

@@ -1,8 +1,8 @@
-export async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 20000, fetchImpl = fetch) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
     return response;
   } finally {
     clearTimeout(timeout);

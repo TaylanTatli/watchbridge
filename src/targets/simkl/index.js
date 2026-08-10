@@ -85,8 +85,40 @@ export async function sendWatchEvent(event, credentials, identity = null) {
   return { result, matched: notFoundCount(result) === 0, notFoundCount: notFoundCount(result) };
 }
 
+function isGenuinelyWatched(item, result) {
+  if (result?.result !== true) return false;
+  // Simkl documents season + episode as the required specific-episode lookup.
+  // A provider episode ID alone may resolve to its parent show, so never infer.
+  if (item.kind === 'episode') {
+    return Boolean(item.season && item.episode && result.last_watched_at);
+  }
+  return result.list === 'completed';
+}
+
+export async function getWatchStates(items, credentials) {
+  if (!credentials?.clientId || !credentials?.accessToken) throw new Error('Simkl is not connected.');
+  if (!Array.isArray(items) || !items.length) return [];
+  const version = chrome.runtime.getManifest().version;
+  const url = `${API}/sync/watched?app-name=watchbridge&app-version=${encodeURIComponent(version)}`;
+  const body = items.map(item => ({
+    ids: normalizeIds(item.ids),
+    ...(item.season && item.episode ? { season: item.season, episode: item.episode } : {})
+  }));
+  const results = await postJson(url, body, {
+    Authorization: `Bearer ${credentials.accessToken}`,
+    'simkl-api-key': credentials.clientId
+  });
+  const values = Array.isArray(results) ? results : [];
+  return items.map((item, index) => ({
+    watched: isGenuinelyWatched(item, values[index]),
+    resolved: typeof values[index]?.result === 'boolean',
+    result: values[index]?.result ?? 'not_found'
+  }));
+}
+
 export const simklTarget = Object.freeze({
   id: 'simkl',
   sendWatchEvent,
+  getWatchStates,
   resolveEvent: resolveWatchEvent
 });

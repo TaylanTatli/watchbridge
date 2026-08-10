@@ -18,19 +18,22 @@ function storageArea() {
   };
 }
 
-test('manifest keeps Netflix optional and requests no broad host access', async () => {
+test('manifest keeps provider hosts optional and requests no broad host access', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(manifest.permissions, ['storage', 'alarms']);
+  assert.equal(manifest.content_scripts, undefined);
+  assert.deepEqual(manifest.permissions, ['storage', 'alarms', 'scripting']);
   assert.deepEqual(manifest.optional_host_permissions, [
     'https://www.netflix.com/*',
+    'https://www.crunchyroll.com/*',
     'https://api.simkl.com/*'
   ]);
 });
 
-test('Netflix permission request remains the first operation in its click handler', async () => {
+test('provider permission request remains the first operation in each generated click handler', async () => {
   const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
-  assert.match(source, /\$\('enableNetflix'\)\.addEventListener\('click', \(\) => \{\s*chrome\.permissions\.request/);
+  assert.match(source, /button\.addEventListener\('click', \(\) => \{\s*chrome\.permissions\.request/);
+  assert.doesNotMatch(source, /button\.addEventListener\('click', async \(\) => \{\s*chrome\.permissions\.request/);
 });
 
 test('every popup element referenced by ID exists in the HTML', async () => {
@@ -48,9 +51,11 @@ test('fresh settings are disabled and OAuth secret drafts stay session-only', as
   const storage = await import('../src/core/storage.js');
 
   assert.deepEqual(await storage.getSettings(), {
-    netflixEnabled: false,
-    threshold: 70,
-    intervalMinutes: 30
+    intervalMinutes: 30,
+    providers: {
+      netflix: { enabled: false, threshold: 70, dimWatched: true },
+      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] }
+    }
   });
 
   await storage.saveOAuthDraft({ clientId: 'public-client-id', clientSecret: 'temporary-secret' });
@@ -70,12 +75,13 @@ test('structured log data redacts token and secret fields', async () => {
   const storage = await import('../src/core/storage.js');
   await storage.addLog('info', '[WatchBridge] test', {
     accessToken: 'must-not-survive',
-    nested: { clientSecret: 'must-not-survive' },
+    nested: { clientSecret: 'must-not-survive', sessionCookie: 'must-not-survive' },
     safe: 'visible'
   });
   const [log] = await storage.getLogs();
   assert.equal(log.data.accessToken, '[redacted]');
   assert.equal(log.data.nested.clientSecret, '[redacted]');
+  assert.equal(log.data.nested.sessionCookie, '[redacted]');
   assert.equal(log.data.safe, 'visible');
 });
 

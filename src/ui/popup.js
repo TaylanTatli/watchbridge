@@ -1,6 +1,5 @@
 import { saveOAuthDraft } from '../core/storage.js';
 
-const NETFLIX_ORIGIN = 'https://www.netflix.com/*';
 const SIMKL_API_ORIGIN = 'https://api.simkl.com/*';
 const $ = id => document.getElementById(id);
 let state = null;
@@ -26,19 +25,113 @@ function formatTime(iso) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
+function providerMarkup(provider) {
+  const config = provider.settings || {};
+  const permissionText = provider.permissionGranted
+    ? (config.enabled ? 'Granted · history sync enabled' : 'Granted · history sync disabled')
+    : 'Not granted';
+  const profiles = Array.isArray(config.profiles) ? config.profiles : [];
+  const profile = provider.id === 'crunchyroll' && provider.permissionGranted ? `
+    <div class="profileRow">
+      <label>Profile
+        <select data-provider="${escapeHtml(provider.id)}" data-action="profile">
+          ${profiles.length
+            ? profiles.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === config.profileId ? 'selected' : ''}>${escapeHtml(item.name)}${item.selected ? ' (active)' : ''}</option>`).join('')
+            : '<option value="">Active Crunchyroll profile</option>'}
+        </select>
+      </label>
+      <button data-provider="${escapeHtml(provider.id)}" data-action="profiles">Refresh</button>
+    </div>` : '';
+  return `<div class="provider" data-provider-card="${escapeHtml(provider.id)}">
+    <div class="row">
+      <div><h3>${escapeHtml(provider.label)}</h3><small>${escapeHtml(permissionText)}</small></div>
+      <button class="primary" data-provider="${escapeHtml(provider.id)}" data-origin="${escapeHtml(provider.permissionOrigin)}" data-label="${escapeHtml(provider.label)}" data-action="enable" ${provider.permissionGranted && config.enabled ? 'disabled' : ''}>${provider.permissionGranted && config.enabled ? 'Enabled' : `Enable ${escapeHtml(provider.label)}`}</button>
+    </div>
+    <div class="row compact">
+      <label>Watched threshold</label>
+      <div><input data-provider="${escapeHtml(provider.id)}" data-action="threshold" type="number" min="1" max="100" value="${Number(config.threshold || 70)}"> %</div>
+    </div>
+    <label class="toggle"><span>Dim watched titles</span><input data-provider="${escapeHtml(provider.id)}" data-action="dim" type="checkbox" ${config.dimWatched ? 'checked' : ''} ${provider.capabilities.siteDecoration ? '' : 'disabled'}></label>
+    ${profile}
+    <div class="actions">
+      <button data-provider="${escapeHtml(provider.id)}" data-action="disable" ${config.enabled ? '' : 'disabled'}>Disable provider</button>
+      <button class="danger" data-provider="${escapeHtml(provider.id)}" data-origin="${escapeHtml(provider.permissionOrigin)}" data-action="revoke" ${provider.permissionGranted ? '' : 'disabled'}>Revoke site access</button>
+    </div>
+  </div>`;
+}
+
+function bindProviderControls() {
+  for (const button of document.querySelectorAll('[data-action="enable"]')) {
+    const providerId = button.dataset.provider;
+    const origin = button.dataset.origin;
+    const label = button.dataset.label;
+    // IMPORTANT: the permission request is the first operation in this click handler.
+    button.addEventListener('click', () => {
+      chrome.permissions.request({ origins: [origin] }, async granted => {
+        if (chrome.runtime.lastError) return alert(chrome.runtime.lastError.message);
+        if (!granted) {
+          alert(`${label} site access was not granted.`);
+          await refresh();
+          return;
+        }
+        const response = await send({ type: 'setProviderSettings', provider: providerId, patch: { enabled: true } });
+        if (!response.ok) alert(response.error); else render(response.state);
+      });
+    });
+  }
+
+  for (const button of document.querySelectorAll('[data-action="disable"]')) {
+    button.addEventListener('click', async () => {
+      const response = await send({ type: 'setProviderSettings', provider: button.dataset.provider, patch: { enabled: false } });
+      if (!response.ok) alert(response.error); else render(response.state);
+    });
+  }
+
+  for (const button of document.querySelectorAll('[data-action="revoke"]')) {
+    button.addEventListener('click', async () => {
+      await send({ type: 'setProviderSettings', provider: button.dataset.provider, patch: { enabled: false, dimWatched: false } });
+      chrome.permissions.remove({ origins: [button.dataset.origin] }, async () => {
+        await send({ type: 'reconcileProviderDecorator', provider: button.dataset.provider });
+        await refresh();
+      });
+    });
+  }
+
+  for (const input of document.querySelectorAll('[data-action="threshold"]')) {
+    input.addEventListener('change', async () => {
+      const response = await send({ type: 'setProviderSettings', provider: input.dataset.provider, patch: { threshold: input.value } });
+      if (response.ok) render(response.state);
+    });
+  }
+  for (const input of document.querySelectorAll('[data-action="dim"]')) {
+    input.addEventListener('change', async () => {
+      const response = await send({ type: 'setProviderSettings', provider: input.dataset.provider, patch: { dimWatched: input.checked } });
+      if (response.ok) render(response.state);
+    });
+  }
+  for (const select of document.querySelectorAll('[data-action="profile"]')) {
+    select.addEventListener('change', async () => {
+      const response = await send({ type: 'setProviderSettings', provider: select.dataset.provider, patch: { profileId: select.value } });
+      if (response.ok) render(response.state);
+    });
+  }
+  for (const button of document.querySelectorAll('[data-action="profiles"]')) {
+    button.addEventListener('click', async () => {
+      setBusy(button, true, 'Loading…');
+      const response = await send({ type: 'refreshProviderProfiles', provider: button.dataset.provider });
+      if (!response.ok) alert(response.error); else render(response.state);
+    });
+  }
+}
+
 function render(next) {
   state = next;
-  const permission = state.netflixPermission;
-  const enabled = state.settings.netflixEnabled;
-  $('netflixPermissionText').textContent = permission
-    ? (enabled ? 'Granted · provider enabled' : 'Granted · provider disabled')
-    : 'Not granted';
-  $('enableNetflix').textContent = permission && enabled ? 'Enabled' : 'Enable Netflix';
-  $('enableNetflix').disabled = permission && enabled;
-  $('threshold').value = state.settings.threshold ?? 70;
+  const providerHost = $('providers');
+  if (!providerHost.contains(document.activeElement) || document.activeElement?.tagName === 'BUTTON') {
+    providerHost.innerHTML = (state.providers || []).map(providerMarkup).join('');
+    bindProviderControls();
+  }
   $('interval').value = state.settings.intervalMinutes ?? 30;
-  $('revokeNetflix').disabled = !permission;
-  $('disableNetflix').disabled = !enabled;
 
   $('redirectUri').textContent = state.redirectUri;
   // Polling must never clobber credentials while the user is typing.
@@ -68,17 +161,17 @@ function render(next) {
     badge.textContent = sync.phase === 'done' ? 'Done' : 'Idle';
   }
 
-  $('syncNow').disabled = sync.running || !enabled || !permission || !state.simkl.connected;
+  const runnable = (state.providers || []).some(provider => (
+    provider.settings?.enabled && provider.permissionGranted && provider.capabilities.historyBackfill
+  ));
+  $('syncNow').disabled = sync.running || !runnable || !state.simkl.connected;
   $('syncNow').textContent = sync.running ? `Syncing: ${sync.phase}…` : 'Sync now';
 
+  const providerStats = Object.values(sync.lastStatsByProvider || {});
   const s = sync.lastStats;
   $('stats').innerHTML = s ? [
     `<strong>Last:</strong> ${formatTime(s.finishedAt)}`,
-    `<strong>Scanned:</strong> ${s.scanned ?? 0}`,
-    `<strong>Eligible:</strong> ${s.eligible ?? 0}`,
-    `<strong>Sent:</strong> ${s.sent ?? 0}`,
-    `<strong>&lt; threshold:</strong> ${s.skippedUnderThreshold ?? 0}`,
-    `<strong>Unmatched:</strong> ${s.unmatched ?? 0}`,
+    ...providerStats.map(item => `<strong>[${escapeHtml(item.provider)}]</strong> scanned ${item.scanned ?? 0}, sent ${item.sent ?? 0}, unmatched ${item.unmatched ?? 0}`),
     `<strong>Stored unmatched:</strong> ${sync.unmatchedRecords?.length ?? 0}`,
     `<strong>Queue:</strong> ${sync.queue?.length ?? 0}`,
     `<strong>Dead:</strong> ${sync.deadLetters?.length ?? 0}`
@@ -112,42 +205,6 @@ $('clientId').addEventListener('input', () => {
 
 $('clientSecret').addEventListener('input', () => {
   saveOAuthDraft({ clientSecret: $('clientSecret').value }).catch(() => {});
-});
-
-// IMPORTANT: permission request is the first operation in the user's click handler.
-// No await, worker message or hidden window occurs before chrome.permissions.request().
-$('enableNetflix').addEventListener('click', () => {
-  chrome.permissions.request({ origins: [NETFLIX_ORIGIN] }, async granted => {
-    if (chrome.runtime.lastError) {
-      alert(chrome.runtime.lastError.message);
-      return;
-    }
-    if (!granted) {
-      alert('Netflix site access was not granted.');
-      await refresh();
-      return;
-    }
-    const response = await send({ type: 'setNetflixEnabled', enabled: true });
-    if (!response.ok) alert(response.error);
-    else render(response.state);
-  });
-});
-
-$('disableNetflix').addEventListener('click', async () => {
-  const response = await send({ type: 'setNetflixEnabled', enabled: false });
-  if (!response.ok) alert(response.error); else render(response.state);
-});
-
-$('revokeNetflix').addEventListener('click', () => {
-  chrome.permissions.remove({ origins: [NETFLIX_ORIGIN] }, async removed => {
-    if (removed) await send({ type: 'setNetflixEnabled', enabled: false });
-    await refresh();
-  });
-});
-
-$('threshold').addEventListener('change', async () => {
-  const response = await send({ type: 'setThreshold', value: $('threshold').value });
-  if (response.ok) render(response.state);
 });
 
 $('interval').addEventListener('change', async () => {
@@ -197,7 +254,7 @@ $('syncNow').addEventListener('click', async () => {
 });
 
 $('resetCheckpoint').addEventListener('click', async () => {
-  if (!confirm('Reset checkpoint and re-read the full Netflix history on next sync?')) return;
+  if (!confirm('Reset checkpoints and re-read enabled provider histories on next sync?')) return;
   const response = await send({ type: 'resetCheckpoint' });
   if (!response.ok) alert(response.error); else render(response.state);
 });

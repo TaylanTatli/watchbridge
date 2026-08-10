@@ -3,24 +3,33 @@ export const KEYS = Object.freeze({
   SIMKL: 'watchbridge.simkl',
   SYNC: 'watchbridge.sync',
   LOGS: 'watchbridge.logs',
+  WATCH_STATE_CACHE: 'watchbridge.watchStateCache',
   OAUTH_PENDING: 'watchbridge.oauth.pending',
   OAUTH_DRAFT_CLIENT_ID: 'watchbridge.oauth.draftClientId',
   OAUTH_DRAFT_SECRET: 'watchbridge.oauth.draftSecret'
 });
 
 const defaults = {
-  settings: { netflixEnabled: false, threshold: 70, intervalMinutes: 30 },
+  settings: {
+    intervalMinutes: 30,
+    providers: {
+      netflix: { enabled: false, threshold: 70, dimWatched: true },
+      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] }
+    }
+  },
   simkl: { clientId: '', accessToken: '' },
   sync: {
     running: false,
     runningSince: 0,
     phase: 'idle',
     lastCommittedMs: 0,
+    providerCheckpoints: {},
     queue: [],
     completedKeys: [],
     deadLetters: [],
     unmatchedRecords: [],
     lastStats: null,
+    lastStatsByProvider: {},
     lastError: ''
   }
 };
@@ -31,14 +40,46 @@ async function getLocal(key, fallback) {
 }
 
 export async function getSettings() {
-  return getLocal(KEYS.SETTINGS, defaults.settings);
+  const stored = await getLocal(KEYS.SETTINGS, defaults.settings);
+  const storedProviders = stored.providers && typeof stored.providers === 'object' ? stored.providers : {};
+  return {
+    ...stored,
+    intervalMinutes: Math.max(1, Number(stored.intervalMinutes || 30)),
+    providers: {
+      netflix: {
+        ...defaults.settings.providers.netflix,
+        ...(storedProviders.netflix || {}),
+        enabled: Boolean(storedProviders.netflix?.enabled ?? stored.netflixEnabled ?? false),
+        threshold: Number(storedProviders.netflix?.threshold ?? stored.threshold ?? 70)
+      },
+      crunchyroll: {
+        ...defaults.settings.providers.crunchyroll,
+        ...(storedProviders.crunchyroll || {})
+      }
+    }
+  };
 }
 
 export async function saveSettings(patch) {
   const current = await getSettings();
-  const value = { ...current, ...patch };
+  const value = {
+    ...current,
+    ...patch,
+    providers: patch.providers ? { ...current.providers, ...patch.providers } : current.providers
+  };
   await chrome.storage.local.set({ [KEYS.SETTINGS]: value });
   return value;
+}
+
+export async function saveProviderSettings(providerId, patch) {
+  const current = await getSettings();
+  if (!current.providers[providerId]) throw new Error(`Unknown provider settings: ${providerId}`);
+  return saveSettings({
+    providers: {
+      ...current.providers,
+      [providerId]: { ...current.providers[providerId], ...patch }
+    }
+  });
 }
 
 export async function getSimkl() {
@@ -63,6 +104,16 @@ export async function getSyncState() {
   state.completedKeys = Array.isArray(state.completedKeys) ? state.completedKeys : [];
   state.deadLetters = Array.isArray(state.deadLetters) ? state.deadLetters : [];
   state.unmatchedRecords = Array.isArray(state.unmatchedRecords) ? state.unmatchedRecords : [];
+  state.providerCheckpoints = state.providerCheckpoints && typeof state.providerCheckpoints === 'object'
+    ? state.providerCheckpoints
+    : {};
+  // Preserve the original Netflix checkpoint during the additive provider migration.
+  if (!state.providerCheckpoints.netflix && Number(state.lastCommittedMs || 0) > 0) {
+    state.providerCheckpoints.netflix = Number(state.lastCommittedMs);
+  }
+  state.lastStatsByProvider = state.lastStatsByProvider && typeof state.lastStatsByProvider === 'object'
+    ? state.lastStatsByProvider
+    : {};
   // A worker can be killed mid-sync. Do not display a stale lock forever.
   if (state.running && Date.now() - (state.runningSince || 0) > 10 * 60 * 1000) {
     state.running = false;
@@ -107,7 +158,7 @@ function redactSensitive(value) {
   if (!value || typeof value !== 'object') return value;
   const result = {};
   for (const [key, child] of Object.entries(value)) {
-    result[key] = /token|secret|authorization/i.test(key) ? '[redacted]' : redactSensitive(child);
+    result[key] = /token|secret|authorization|cookie|session|password/i.test(key) ? '[redacted]' : redactSensitive(child);
   }
   return result;
 }
@@ -118,6 +169,15 @@ export async function getLogs() {
 
 export async function clearLogs() {
   await chrome.storage.local.set({ [KEYS.LOGS]: [] });
+}
+
+export async function getWatchStateCache() {
+  return getLocal(KEYS.WATCH_STATE_CACHE, {});
+}
+
+export async function saveWatchStateCache(value) {
+  await chrome.storage.local.set({ [KEYS.WATCH_STATE_CACHE]: value });
+  return value;
 }
 
 

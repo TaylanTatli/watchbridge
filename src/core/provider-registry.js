@@ -1,7 +1,9 @@
 import { netflixProvider } from '../providers/netflix/index.js';
+import { crunchyrollProvider } from '../providers/crunchyroll/index.js';
 
 const providers = new Map([
-  [netflixProvider.id, netflixProvider]
+  [netflixProvider.id, netflixProvider],
+  [crunchyrollProvider.id, crunchyrollProvider]
 ]);
 
 export function getProvider(id) {
@@ -11,5 +13,11 @@ export function getProvider(id) {
 }
 
 export function listProviders() {
-  return [...providers.values()].map(({ id, label, permissionOrigin }) => ({ id, label, permissionOrigin }));
+  return [...providers.values()].map(({ id, label, permissionOrigin, capabilities, siteAdapter }) => ({
+    id,
+    label,
+    permissionOrigin,
+    capabilities: { ...capabilities },
+    siteAdapter: siteAdapter ? structuredClone(siteAdapter) : null
+  }));
 }

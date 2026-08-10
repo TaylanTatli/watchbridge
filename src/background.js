@@ -1,7 +1,9 @@
-import { getSettings, saveSettings, getSimkl, clearSimklToken, getSyncState, getLogs, clearLogs, addLog, getOAuthDraft, recoverInterruptedSyncState } from './core/storage.js';
-import { syncProvider, resetCheckpoint } from './core/sync-engine.js';
+import { getSettings, saveSettings, saveProviderSettings, getSimkl, clearSimklToken, getSyncState, getLogs, clearLogs, addLog, getOAuthDraft, recoverInterruptedSyncState } from './core/storage.js';
+import { syncEnabledProviders, resetCheckpoint } from './core/sync-engine.js';
 import { beginOAuth, finishOAuth, redirectUri } from './targets/simkl/oauth.js';
-import { getProvider } from './core/provider-registry.js';
+import { getProvider, listProviders } from './core/provider-registry.js';
+import { getWatchStates, invalidateWatchStateCache } from './core/watch-state.js';
+import { reconcileProviderDecorator, reconcileSiteDecorators, refreshDecoratedTabs } from './core/site-decoration.js';
 
 const ALARM = 'watchbridge-sync';
 
@@ -17,8 +19,10 @@ async function getState() {
   const [settings, simkl, sync, logs, oauthDraft] = await Promise.all([
     getSettings(), getSimkl(), getSyncState(), getLogs(), getOAuthDraft()
   ]);
-  const netflix = getProvider('netflix');
-  const netflixPermission = await chrome.permissions.contains({ origins: [netflix.permissionOrigin] });
+  const providerDefinitions = listProviders();
+  const permissions = await Promise.all(providerDefinitions.map(provider => (
+    chrome.permissions.contains({ origins: [provider.permissionOrigin] })
+  )));
   const simklPermission = await chrome.permissions.contains({ origins: ['https://api.simkl.com/*'] });
   return {
     settings,
@@ -26,14 +30,25 @@ async function getState() {
     oauthDraft,
     sync,
     logs,
-    netflixPermission,
+    providers: providerDefinitions.map((provider, index) => ({
+      ...provider,
+      permissionGranted: permissions[index],
+      settings: settings.providers[provider.id]
+    })),
+    netflixPermission: permissions[providerDefinitions.findIndex(provider => provider.id === 'netflix')],
     simklPermission,
     redirectUri: redirectUri(),
     extensionId: chrome.runtime.id
   };
 }
 
-const startup = recoverInterruptedSyncState().then(ensureAlarm);
+async function refreshAllDecoratedTabs() {
+  for (const provider of listProviders()) {
+    if (provider.capabilities.siteDecoration) await refreshDecoratedTabs(provider.id).catch(() => {});
+  }
+}
+
+const startup = recoverInterruptedSyncState().then(ensureAlarm).then(reconcileSiteDecorators);
 
 chrome.runtime.onInstalled.addListener(async () => {
   await startup;
@@ -45,10 +60,10 @@ chrome.alarms.onAlarm.addListener(async alarm => {
   await startup;
   if (alarm.name !== ALARM) return;
   const settings = await getSettings();
-  if (!settings.netflixEnabled) return;
+  if (!Object.values(settings.providers || {}).some(provider => provider.enabled)) return;
   const simkl = await getSimkl();
   if (!simkl.accessToken) return;
-  await syncProvider('netflix');
+  await syncEnabledProviders();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -61,14 +76,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
 
         case 'setNetflixEnabled':
-          await saveSettings({ netflixEnabled: Boolean(message.enabled) });
+          await saveProviderSettings('netflix', { enabled: Boolean(message.enabled) });
           sendResponse({ ok: true, state: await getState() });
           return;
 
         case 'setThreshold':
-          await saveSettings({ threshold: Math.min(100, Math.max(1, Number(message.value || 70))) });
+          await saveProviderSettings('netflix', { threshold: Math.min(100, Math.max(1, Number(message.value || 70))) });
           sendResponse({ ok: true, state: await getState() });
           return;
+
+        case 'setProviderSettings': {
+          const provider = getProvider(message.provider);
+          const patch = {};
+          if (message.patch?.enabled !== undefined) patch.enabled = Boolean(message.patch.enabled);
+          if (message.patch?.dimWatched !== undefined) patch.dimWatched = Boolean(message.patch.dimWatched);
+          if (message.patch?.threshold !== undefined) {
+            patch.threshold = Math.min(100, Math.max(1, Number(message.patch.threshold || 70)));
+          }
+          if (message.patch?.profileId !== undefined) patch.profileId = String(message.patch.profileId || '');
+          await saveProviderSettings(provider.id, patch);
+          await reconcileProviderDecorator(provider.id);
+          sendResponse({ ok: true, state: await getState() });
+          return;
+        }
+
+        case 'refreshProviderProfiles': {
+          const provider = getProvider(message.provider);
+          if (typeof provider.listProfiles !== 'function') throw new Error(`${provider.label} does not expose profiles.`);
+          const profiles = await provider.listProfiles();
+          const current = (await getSettings()).providers[provider.id];
+          const selected = profiles.find(profile => profile.selected);
+          await saveProviderSettings(provider.id, {
+            profiles,
+            profileId: current.profileId || selected?.id || ''
+          });
+          sendResponse({ ok: true, state: await getState() });
+          return;
+        }
+
+        case 'reconcileProviderDecorator':
+          await reconcileProviderDecorator(message.provider);
+          sendResponse({ ok: true, state: await getState() });
+          return;
+
+        case 'getWatchStates': {
+          const provider = getProvider(message.provider);
+          if (!sender.tab?.url?.startsWith(provider.permissionOrigin.replace('*', ''))) {
+            throw new Error('Watch-state request did not originate from the provider site.');
+          }
+          const result = await getWatchStates(provider.id, message.items);
+          sendResponse({ ok: true, ...result });
+          return;
+        }
 
         case 'setInterval':
           await saveSettings({ intervalMinutes: Math.max(1, Number(message.value || 30)) });
@@ -83,18 +142,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'finishOAuth':
           await finishOAuth(message);
+          await invalidateWatchStateCache();
+          await refreshAllDecoratedTabs();
           sendResponse({ ok: true });
           return;
 
         case 'disconnectSimkl':
           await clearSimklToken();
+          await invalidateWatchStateCache();
+          await refreshAllDecoratedTabs();
           sendResponse({ ok: true, state: await getState() });
           return;
 
         case 'syncNow':
           // Keep this message event alive for the sync job. The popup may close; the worker continues.
           await addLog('info', '[WatchBridge] Sync Now command received from popup.');
-          await syncProvider('netflix');
+          await syncEnabledProviders();
           sendResponse({ ok: true, state: await getState() });
           return;
 
@@ -120,3 +183,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 startup.catch(() => {});
+
+chrome.permissions.onAdded.addListener(() => { reconcileSiteDecorators().catch(() => {}); });
+chrome.permissions.onRemoved.addListener(() => { reconcileSiteDecorators().catch(() => {}); });

@@ -33,9 +33,10 @@ export function buildResolutionCandidates(event) {
     candidates.push({ key, value: ids[key], role: 'item' });
   }
 
-  const seriesId = event.metadata?.netflix?.seriesId;
-  if (event.type === 'episode' && seriesId && String(seriesId) !== ids.netflix) {
-    candidates.push({ key: 'netflix', value: String(seriesId), role: 'series' });
+  const providerKey = event.source;
+  const seriesId = event.metadata?.[providerKey]?.seriesId;
+  if (event.type === 'episode' && LOOKUP_ORDER.includes(providerKey) && seriesId && String(seriesId) !== ids[providerKey]) {
+    candidates.push({ key: providerKey, value: String(seriesId), role: 'series' });
   }
   return candidates;
 }
@@ -122,7 +123,7 @@ export async function resolveWatchEvent(event, credentials, options = {}) {
     identity: null,
     attempts,
     reason: event.type === 'episode' && (!event.season || !event.episode)
-      ? 'No unique stable identity with Netflix season/episode coordinates was available.'
+      ? 'No unique stable identity with provider season/episode coordinates was available.'
       : 'No provider ID resolved uniquely to a compatible Simkl record.'
   };
 }

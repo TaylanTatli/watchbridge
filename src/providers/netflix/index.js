@@ -145,5 +145,16 @@ export const netflixProvider = Object.freeze({
   id: 'netflix',
   label: 'Netflix',
   permissionOrigin: 'https://www.netflix.com/*',
+  siteAdapter: Object.freeze({
+    matches: ['https://www.netflix.com/*'],
+    js: ['src/site-adapters/netflix/content.js', 'src/site-adapters/runtime.js'],
+    css: ['src/site-adapters/netflix/content.css']
+  }),
+  capabilities: Object.freeze({
+    historyBackfill: true,
+    incrementalHistory: true,
+    currentPlaybackScrobble: false,
+    siteDecoration: true
+  }),
   fetchEvents
 });

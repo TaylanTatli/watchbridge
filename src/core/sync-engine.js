@@ -1,13 +1,16 @@
-import { getProvider } from './provider-registry.js';
-import { getSettings, getSimkl, getSyncState, saveSyncState, addLog } from './storage.js';
+import { getProvider, listProviders } from './provider-registry.js';
+import { getSettings, getSimkl, getSyncState, saveSyncState, saveProviderSettings, addLog } from './storage.js';
 import { compactWatchEvent, normalizeIds, watchEventKey } from './types.js';
 import { resolveForTarget } from './resolver.js';
 import { simklTarget } from '../targets/simkl/index.js';
+import { rememberSyncedWatch } from './watch-state.js';
+import { refreshDecoratedTabs } from './site-decoration.js';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const MAX_COMPLETED_KEYS = 20000;
 const MAX_UNMATCHED_RECORDS = 1000;
 let inProcess = false;
+let providerBatchInProcess = false;
 
 function isTransient(error) {
   return !error?.status || error.status === 408 || error.status === 429 || error.status >= 500;
@@ -22,14 +25,17 @@ function rememberCompleted(state, key) {
 
 function unmatchedRecord(item, resolution, finalReason) {
   const dateMs = Number(item.watchedAtMs || 0);
+  const providerDate = dateMs > 0 ? new Date(dateMs).toISOString() : item.watchedAt;
   return {
     key: item.key,
     source: item.source,
     sourceId: item.sourceId,
-    localizedNetflixTitle: item.metadata?.netflix?.localizedTitle || item.title || '',
+    localizedTitle: item.metadata?.[item.source]?.localizedTitle || item.title || '',
+    localizedNetflixTitle: item.metadata?.netflix?.localizedTitle || '',
     seriesTitle: item.seriesTitle || '',
     episodeTitle: item.episodeTitle || '',
-    netflixDate: dateMs > 0 ? new Date(dateMs).toISOString() : item.watchedAt,
+    providerDate,
+    netflixDate: item.source === 'netflix' ? providerDate : null,
     candidateIds: normalizeIds(item.ids),
     season: item.season || null,
     episode: item.episode || null,
@@ -82,25 +88,41 @@ export async function syncProvider(providerId = 'netflix') {
     skippedUnderThreshold: 0,
     errors: 0
   };
+  const syncedProviders = new Set();
 
   try {
     const settings = await getSettings();
-    if (!settings.netflixEnabled) throw new Error('Netflix provider is disabled.');
-
     const provider = getProvider(providerId);
+    const providerSettings = settings.providers?.[providerId];
+    if (!provider.capabilities?.historyBackfill) throw new Error(`${provider.label} does not support history backfill.`);
+    if (!providerSettings?.enabled) throw new Error(`${provider.label} provider is disabled.`);
+
     const hasPermission = await chrome.permissions.contains({ origins: [provider.permissionOrigin] });
-    if (!hasPermission) throw new Error('Netflix site permission is not granted. Click Enable Netflix again.');
+    if (!hasPermission) throw new Error(`${provider.label} site permission is not granted. Click Enable ${provider.label} again.`);
 
     const simkl = await getSimkl();
     if (!simkl.clientId || !simkl.accessToken) throw new Error('Connect Simkl first.');
 
-    const checkpoint = Number(state.lastCommittedMs || 0);
-    await addLog('info', '[Netflix] Fetching viewing history.', { checkpoint });
-    const fetched = await provider.fetchEvents({ afterMs: checkpoint, threshold: Number(settings.threshold || 70) });
+    const requestedCheckpointKey = providerSettings.profileId
+      ? `${providerId}:${providerSettings.profileId}`
+      : providerId;
+    const checkpoint = Number(state.providerCheckpoints?.[requestedCheckpointKey] || 0);
+    await addLog('info', `[${provider.label}] Fetching viewing history.`, { checkpoint });
+    const fetched = await provider.fetchEvents({
+      afterMs: checkpoint,
+      threshold: Number(providerSettings.threshold || 70),
+      profileId: providerSettings.profileId || ''
+    });
+    if (Array.isArray(fetched.profiles)) {
+      await saveProviderSettings(providerId, {
+        profiles: fetched.profiles,
+        profileId: providerSettings.profileId || fetched.selectedProfileId || ''
+      });
+    }
     stats.scanned = fetched.scanned;
     stats.eligible = fetched.events.length;
     stats.skippedUnderThreshold = fetched.skippedUnderThreshold;
-    await addLog('info', '[Netflix] History fetched and normalized.', {
+    await addLog('info', `[${provider.label}] History fetched and normalized.`, {
       scanned: stats.scanned,
       eligible: stats.eligible,
       skippedUnderThreshold: stats.skippedUnderThreshold
@@ -111,7 +133,7 @@ export async function syncProvider(providerId = 'netflix') {
 
     state.phase = 'sending';
     await saveSyncState(state);
-    await addLog('info', '[Queue] Events ready for delivery.', { added: stats.queued, queueSize: state.queue.length });
+    await addLog('info', `[Queue] ${provider.label} events ready for delivery.`, { added: stats.queued, queueSize: state.queue.length });
     if (state.queue.length) {
       await addLog('info', '[Simkl] Sending queued events to sync history.', { queueSize: state.queue.length });
     }
@@ -140,8 +162,10 @@ export async function syncProvider(providerId = 'netflix') {
 
         if (sent.matched) {
           stats.sent++;
+          syncedProviders.add(item.source);
           rememberCompleted(state, item.key);
-          await addLog('info', `[Simkl] Synced ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
+          await rememberSyncedWatch(item.source, item.sourceId, item.type).catch(() => {});
+          await addLog('info', `[Simkl] Synced ${item.source} ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
         } else {
           stats.unmatched++;
           const reason = resolution.reason || 'Simkl returned not_found and no safe fallback identity was available.';
@@ -183,19 +207,32 @@ export async function syncProvider(providerId = 'netflix') {
     }
 
     // Only advance the checkpoint after the persistent queue has drained.
-    if (fetched.newestMs > checkpoint) state.lastCommittedMs = fetched.newestMs;
+    if (fetched.newestMs > checkpoint) {
+      const committedCheckpointKey = fetched.selectedProfileId
+        ? `${providerId}:${fetched.selectedProfileId}`
+        : requestedCheckpointKey;
+      state.providerCheckpoints = { ...(state.providerCheckpoints || {}), [committedCheckpointKey]: fetched.newestMs };
+      if (providerId === 'netflix') state.lastCommittedMs = fetched.newestMs;
+    }
     state.phase = 'done';
     state.lastStats = { ...stats, finishedAt: new Date().toISOString() };
+    state.lastStatsByProvider = { ...(state.lastStatsByProvider || {}), [providerId]: state.lastStats };
     state.lastError = '';
     await saveSyncState(state);
-    await addLog('info', '[WatchBridge] Sync completed.', state.lastStats);
+    await addLog('info', `[${provider.label}] Sync completed.`, state.lastStats);
+    for (const syncedProviderId of syncedProviders) {
+      await refreshDecoratedTabs(syncedProviderId).catch(async error => {
+        await addLog('warn', `[${provider.label}] Site decoration refresh failed.`, { error: error.message || String(error) });
+      });
+    }
   } catch (error) {
     state = await getSyncState();
     state.phase = 'error';
     state.lastError = error.message || String(error);
     state.lastStats = { ...stats, finishedAt: new Date().toISOString() };
     await saveSyncState(state);
-    await addLog('error', '[WatchBridge] Sync failed.', { error: state.lastError });
+    const label = (() => { try { return getProvider(providerId).label; } catch { return providerId; } })();
+    await addLog('error', `[${label}] Sync failed.`, { error: state.lastError });
   } finally {
     state = await getSyncState();
     state.running = false;
@@ -205,10 +242,29 @@ export async function syncProvider(providerId = 'netflix') {
   }
 }
 
+export async function syncEnabledProviders() {
+  if (providerBatchInProcess) return;
+  providerBatchInProcess = true;
+  try {
+    const settings = await getSettings();
+    const enabled = listProviders().filter(provider => (
+      provider.capabilities.historyBackfill && settings.providers?.[provider.id]?.enabled
+    ));
+    if (!enabled.length) {
+      await addLog('warn', '[WatchBridge] Sync skipped because no historical provider is enabled.');
+      return;
+    }
+    for (const provider of enabled) await syncProvider(provider.id);
+  } finally {
+    providerBatchInProcess = false;
+  }
+}
+
 export async function resetCheckpoint() {
   const state = await getSyncState();
   if (state.running) throw new Error('Cannot reset while syncing.');
   state.lastCommittedMs = 0;
+  state.providerCheckpoints = {};
   state.queue = [];
   state.deadLetters = [];
   state.unmatchedRecords = [];
