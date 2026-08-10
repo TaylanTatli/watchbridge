@@ -1,9 +1,11 @@
 import { netflixProvider } from '../providers/netflix/index.js';
 import { crunchyrollProvider } from '../providers/crunchyroll/index.js';
+import { primeVideoProvider } from '../providers/primevideo/index.js';
 
 const providers = new Map([
   [netflixProvider.id, netflixProvider],
-  [crunchyrollProvider.id, crunchyrollProvider]
+  [crunchyrollProvider.id, crunchyrollProvider],
+  [primeVideoProvider.id, primeVideoProvider]
 ]);
 
 export function getProvider(id) {
@@ -13,10 +15,12 @@ export function getProvider(id) {
 }
 
 export function listProviders() {
-  return [...providers.values()].map(({ id, label, permissionOrigin, capabilities, siteAdapter }) => ({
+  return [...providers.values()].map(({ id, label, permissionOrigin, permissionOrigins, usesWatchedThreshold = true, capabilities, siteAdapter }) => ({
     id,
     label,
     permissionOrigin,
+    permissionOrigins: permissionOrigins ? [...permissionOrigins] : [permissionOrigin],
+    usesWatchedThreshold,
     capabilities: { ...capabilities },
     siteAdapter: siteAdapter ? structuredClone(siteAdapter) : null
   }));

@@ -26,6 +26,8 @@ test('manifest keeps provider hosts optional and requests no broad host access',
   assert.deepEqual(manifest.optional_host_permissions, [
     'https://www.netflix.com/*',
     'https://www.crunchyroll.com/*',
+    'https://www.primevideo.com/*',
+    'https://atv-ps-eu.primevideo.com/*',
     'https://api.simkl.com/*'
   ]);
 });
@@ -71,7 +73,8 @@ test('fresh settings are disabled and OAuth secret drafts stay session-only', as
     intervalMinutes: 30,
     providers: {
       netflix: { enabled: false, threshold: 70, dimWatched: true },
-      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] }
+      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] },
+      primevideo: { enabled: false, dimWatched: false }
     }
   });
 
@@ -93,12 +96,14 @@ test('structured log data redacts token and secret fields', async () => {
   await storage.addLog('info', '[WatchBridge] test', {
     accessToken: 'must-not-survive',
     nested: { clientSecret: 'must-not-survive', sessionCookie: 'must-not-survive' },
+    actions: { REMOVE: { query: { titleIds: 'must-not-survive' } } },
     safe: 'visible'
   });
   const [log] = await storage.getLogs();
   assert.equal(log.data.accessToken, '[redacted]');
   assert.equal(log.data.nested.clientSecret, '[redacted]');
   assert.equal(log.data.nested.sessionCookie, '[redacted]');
+  assert.equal(log.data.actions, '[redacted]');
   assert.equal(log.data.safe, 'visible');
 });
 

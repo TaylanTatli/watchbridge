@@ -54,20 +54,25 @@ function providerMarkup(provider) {
       </label>
       <button data-provider="${escapeHtml(provider.id)}" data-action="profiles">Refresh</button>
     </div>` : '';
+  const threshold = provider.usesWatchedThreshold ? `<div class="row compact">
+      <label>Watched threshold</label>
+      <div><input data-provider="${escapeHtml(provider.id)}" data-action="threshold" type="number" min="1" max="100" value="${Number(config.threshold || 70)}"> %</div>
+    </div>` : '';
+  const decoration = provider.capabilities.siteDecoration
+    ? `<label class="toggle"><span>Dim watched titles</span><input data-provider="${escapeHtml(provider.id)}" data-action="dim" type="checkbox" ${config.dimWatched ? 'checked' : ''}></label>`
+    : '';
+  const origins = escapeHtml(JSON.stringify(provider.permissionOrigins || [provider.permissionOrigin]));
   return `<div class="provider" data-provider-card="${escapeHtml(provider.id)}">
     <div class="row">
       <div><h3>${escapeHtml(provider.label)}</h3><small>${escapeHtml(permissionText)}</small></div>
-      <button class="primary" data-provider="${escapeHtml(provider.id)}" data-origin="${escapeHtml(provider.permissionOrigin)}" data-label="${escapeHtml(provider.label)}" data-action="enable" ${provider.permissionGranted && config.enabled ? 'disabled' : ''}>${provider.permissionGranted && config.enabled ? 'Enabled' : `Enable ${escapeHtml(provider.label)}`}</button>
+      <button class="primary" data-provider="${escapeHtml(provider.id)}" data-origins="${origins}" data-label="${escapeHtml(provider.label)}" data-action="enable" ${provider.permissionGranted && config.enabled ? 'disabled' : ''}>${provider.permissionGranted && config.enabled ? 'Enabled' : `Enable ${escapeHtml(provider.label)}`}</button>
     </div>
-    <div class="row compact">
-      <label>Watched threshold</label>
-      <div><input data-provider="${escapeHtml(provider.id)}" data-action="threshold" type="number" min="1" max="100" value="${Number(config.threshold || 70)}"> %</div>
-    </div>
-    <label class="toggle"><span>Dim watched titles</span><input data-provider="${escapeHtml(provider.id)}" data-action="dim" type="checkbox" ${config.dimWatched ? 'checked' : ''} ${provider.capabilities.siteDecoration ? '' : 'disabled'}></label>
+    ${threshold}
+    ${decoration}
     ${profile}
     <div class="actions">
       <button data-provider="${escapeHtml(provider.id)}" data-action="disable" ${config.enabled ? '' : 'disabled'}>Disable provider</button>
-      <button class="danger" data-provider="${escapeHtml(provider.id)}" data-origin="${escapeHtml(provider.permissionOrigin)}" data-action="revoke" ${provider.permissionGranted ? '' : 'disabled'}>Revoke site access</button>
+      <button class="danger" data-provider="${escapeHtml(provider.id)}" data-origins="${origins}" data-action="revoke" ${provider.permissionGranted ? '' : 'disabled'}>Revoke site access</button>
     </div>
   </div>`;
 }
@@ -75,11 +80,11 @@ function providerMarkup(provider) {
 function bindProviderControls() {
   for (const button of document.querySelectorAll('[data-action="enable"]')) {
     const providerId = button.dataset.provider;
-    const origin = button.dataset.origin;
+    const origins = JSON.parse(button.dataset.origins);
     const label = button.dataset.label;
     // IMPORTANT: the permission request is the first operation in this click handler.
     button.addEventListener('click', () => {
-      chrome.permissions.request({ origins: [origin] }, async granted => {
+      chrome.permissions.request({ origins }, async granted => {
         if (chrome.runtime.lastError) return showNotice(chrome.runtime.lastError.message);
         if (!granted) {
           showNotice(`${label} site access was not granted.`);
@@ -100,9 +105,10 @@ function bindProviderControls() {
   }
 
   for (const button of document.querySelectorAll('[data-action="revoke"]')) {
+    const origins = JSON.parse(button.dataset.origins);
     button.addEventListener('click', async () => {
       await send({ type: 'setProviderSettings', provider: button.dataset.provider, patch: { enabled: false, dimWatched: false } });
-      chrome.permissions.remove({ origins: [button.dataset.origin] }, async () => {
+      chrome.permissions.remove({ origins }, async () => {
         await send({ type: 'reconcileProviderDecorator', provider: button.dataset.provider });
         await refresh();
       });

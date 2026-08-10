@@ -10,7 +10,7 @@ function storageArea() {
   };
 }
 
-test('provider capabilities represent Netflix and Crunchyroll honestly', async () => {
+test('provider capabilities represent Netflix, Crunchyroll, and Prime Video honestly', async () => {
   const { listProviders } = await import('../src/core/provider-registry.js');
   const providers = Object.fromEntries(listProviders().map(provider => [provider.id, provider]));
   for (const id of ['netflix', 'crunchyroll']) {
@@ -21,9 +21,16 @@ test('provider capabilities represent Netflix and Crunchyroll honestly', async (
       siteDecoration: true
     });
   }
+  assert.deepEqual(providers.primevideo.capabilities, {
+    historyBackfill: true,
+    incrementalHistory: true,
+    currentPlaybackScrobble: false,
+    siteDecoration: false
+  });
+  assert.equal(providers.primevideo.usesWatchedThreshold, false);
 });
 
-test('Netflix and Crunchyroll can be enabled independently', async () => {
+test('Netflix, Crunchyroll, and Prime Video can be enabled independently', async () => {
   globalThis.chrome = { storage: { local: storageArea(), session: storageArea() } };
   const storage = await import(`../src/core/storage.js?providers=${Date.now()}`);
   await storage.saveProviderSettings('netflix', { enabled: true });
@@ -36,6 +43,13 @@ test('Netflix and Crunchyroll can be enabled independently', async () => {
   settings = await storage.getSettings();
   assert.equal(settings.providers.netflix.enabled, false);
   assert.equal(settings.providers.crunchyroll.enabled, true);
+  assert.equal(settings.providers.primevideo.enabled, false);
+
+  await storage.saveProviderSettings('primevideo', { enabled: true });
+  await storage.saveProviderSettings('crunchyroll', { enabled: false });
+  settings = await storage.getSettings();
+  assert.equal(settings.providers.primevideo.enabled, true);
+  assert.equal(settings.providers.crunchyroll.enabled, false);
 });
 
 test('decorator registration restores after worker startup and unregisters on revoke', async () => {

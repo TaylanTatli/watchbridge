@@ -5,19 +5,20 @@ WatchBridge is a Chrome/Chromium extension that imports watch history from strea
 ```text
 Netflix ──────┐
               ├─> normalized WatchEvent ─> persistent sync engine ─> Simkl
-Crunchyroll ──┘
+Crunchyroll ──┤
+Prime Video ──┘
 ```
 
-The project is built around independent providers and targets. Streaming-site code does not know how Simkl works, and the Simkl target does not depend on Netflix or Crunchyroll internals.
+The project is built around independent providers and targets. Streaming-site code does not know how Simkl works, and the Simkl target does not depend on any provider's internals.
 
 > [!IMPORTANT]
-> WatchBridge is an unofficial project. Netflix and Crunchyroll history synchronization relies on private web APIs used by their own websites. Those endpoints can change without notice.
+> WatchBridge is an unofficial project. Netflix, Crunchyroll, and Prime Video history synchronization relies on private web APIs used by their own websites. Those endpoints can change without notice.
 
 ## Features
 
-- Netflix and Crunchyroll history import using the browser's existing signed-in session
+- Netflix, Crunchyroll, and Prime Video history import using the browser's existing signed-in session
 - Incremental synchronization with persistent, provider-specific checkpoints
-- Configurable watched threshold per provider
+- Configurable watched threshold for providers that expose meaningful playback progress
 - Deterministic event identity and duplicate-rescan suppression
 - Persistent queue, retries, dead letters, and unmatched diagnostics
 - Stable-ID resolution before any title-based fallback
@@ -33,6 +34,7 @@ The project is built around independent providers and targets. Streaming-site co
 |---|---|---|
 | Netflix | Provider | History backfill, incremental sync, site decoration |
 | Crunchyroll | Provider | History backfill, incremental sync, site decoration with episode limitations |
+| Prime Video | Provider | History backfill and incremental sync; no progress threshold or site decoration |
 | Simkl | Target | OAuth, history writes, identity resolution, authoritative watch-state lookup |
 
 Other streaming services are intentionally not exposed as placeholder providers. See [Future services](#future-services) for the current feasibility notes.
@@ -69,16 +71,20 @@ Use the redirect URI displayed in the popup if your runtime ID differs.
 
 ### Enabling providers
 
-Netflix and Crunchyroll access is optional and is not granted during installation.
+Provider access is optional and is not granted during installation.
 
 1. Open the WatchBridge popup.
-2. Select **Enable Netflix** or **Enable Crunchyroll**.
+2. Select the provider's **Enable** button.
 3. Accept Chrome's native site-access prompt.
-4. Configure the watched threshold and optional title dimming.
+4. Configure the options supported by that provider.
 
 The host-permission request is invoked directly by the button click. No worker round trip, hidden window, or awaited operation occurs before `chrome.permissions.request()`.
 
 For Crunchyroll, sign in on `crunchyroll.com` using the same Chrome profile, then select **Refresh** to load available profiles. WatchBridge never persists the short-lived Crunchyroll access token.
+
+For Prime Video, sign in on `primevideo.com` in the same Chrome profile. Prime's watch-history records are treated as watched activity directly, so no Netflix-style progress threshold is applied. Movie entries and child episodes are enriched with English `catalogMetadataV2` metadata when available; season containers are never emitted as watches.
+
+Prime pagination reads the opaque `nextToken` from the `watch-history` widget and sends it unchanged to `getWatchHistorySettingsPage`. Catalog enrichment sends the item's GTI as `entityId` and uses the smallest player-resource request verified for the browser client: an ephemeral 128-bit `deviceID`, Prime's public web `deviceTypeID`, `firmware=1`, `uxLocale=en_US`, and `desiredResources=catalogMetadataV2`. Captured account/session parameters such as `nerid` are not copied, persisted, or required by this request.
 
 ## Usage
 
@@ -89,7 +95,7 @@ Connect Simkl, enable at least one provider, and select **Sync now**.
 WatchBridge will:
 
 1. Read new provider history after the stored checkpoint.
-2. Calculate playback progress and apply the configured threshold.
+2. Apply playback thresholds only when that provider exposes meaningful progress.
 3. Normalize eligible entries into `WatchEvent` objects.
 4. Suppress events already queued, completed, unmatched, or dead-lettered.
 5. Deliver the persistent queue to Simkl.
@@ -132,7 +138,7 @@ Providers emit target-neutral events. Optional values are included only when sup
 
 ```js
 {
-  source: 'netflix' | 'crunchyroll',
+  source: 'netflix' | 'crunchyroll' | 'primevideo',
   sourceId: 'provider-event-id',
   type: 'movie' | 'episode',
 
@@ -157,7 +163,7 @@ Providers emit target-neutral events. Optional values are included only when sup
   },
 
   metadata: {
-    watchedAtUnit: 'unix_seconds' | 'iso_8601',
+    watchedAtUnit: 'unix_seconds' | 'unix_milliseconds' | 'iso_8601',
     episodeNumbering: 'season_episode' | null
   }
 }
@@ -170,6 +176,8 @@ source + sourceId + watchedAt
 ```
 
 Provider timestamps are never synthesized. The Simkl target converts them to ISO-8601 only when constructing the outgoing request.
+
+Prime GTIs and detail IDs remain provider identity in `sourceId` and `metadata.primevideo`; they are deliberately not placed in `ids`, because Simkl does not document them as supported external identifiers.
 
 ### Resolver behavior
 
@@ -198,6 +206,7 @@ src/
   providers/
     netflix/
     crunchyroll/
+    primevideo/
   site-adapters/
     netflix/
     crunchyroll/
@@ -215,23 +224,26 @@ src/
 - Client secrets are stored only in `chrome.storage.session` while needed for OAuth.
 - OAuth access tokens, client secrets, cookies, and authorization headers are recursively redacted from structured logs.
 - Crunchyroll session tokens and generated device IDs are not persisted.
+- Prime REMOVE actions, browser session data, and metadata-request device IDs are neither stored nor logged.
+- Prime's bounded metadata cache contains only canonical catalog fields keyed by GTI.
 - The popup never displays the raw Simkl Client ID after connection.
 - WatchBridge requests no permissions for unsupported streaming platforms.
 
 ## Known limitations
 
-- Netflix and Crunchyroll history endpoints are private and may change.
+- Netflix, Crunchyroll, and Prime Video history endpoints are private and may change.
 - Netflix provider-ID lookup is documented by Simkl as beta.
 - WatchBridge does not invoke an unverified Crunchyroll profile-switch endpoint. The selected profile must be active on Crunchyroll.
 - Remote episode decoration remains conservative when a visible card does not expose safe canonical coordinates.
 - Playback scrobbling is not implemented; current providers import recorded history.
+- Prime titles removed from the catalog or unavailable in the current region use cached canonical metadata when present; otherwise they remain unmatched rather than being guessed from a localized title.
+- Prime title resolution requires one exact, type-compatible canonical Simkl result. Ambiguous titles remain unmatched, especially when a release year is unavailable.
 - Live integration tests require signed-in provider sessions and personal Simkl OAuth credentials.
 
 ## Future services
 
 | Service | History backfill | Browser scrobble | Site decoration | Current status |
 |---|---|---|---|---|
-| Prime Video | No stable accurate source verified | Research possible | Research possible | No permission requested |
 | Disney+ | No accessible history source verified | Research possible | Research possible | No permission requested |
 | Hulu | No accessible history source verified | Research possible | Research possible | No permission requested |
 | Max | No accessible history source verified | Research possible | Research possible | No permission requested |

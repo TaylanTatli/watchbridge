@@ -1,17 +1,17 @@
 # Manual testing checklist
 
-Use this checklist before publishing a WatchBridge release. Tests involving Netflix, Crunchyroll, or Simkl require the tester's own accounts and credentials.
+Use this checklist before publishing a WatchBridge release. Tests involving Netflix, Crunchyroll, Prime Video, or Simkl require the tester's own accounts and credentials.
 
 ## Fresh installation
 
 1. Remove or disable the existing unpacked installation.
 2. Load the repository from `chrome://extensions`.
-3. Confirm Netflix and Crunchyroll initially show **Not granted**.
+3. Confirm Netflix, Crunchyroll, and Prime Video initially show **Not granted**.
 4. Confirm Simkl is disconnected on a genuinely fresh storage profile.
 
 ## Optional provider permissions
 
-For both Netflix and Crunchyroll:
+For Netflix, Crunchyroll, and Prime Video:
 
 1. Select the provider's **Enable** button.
 2. Confirm Chrome displays its native host-permission prompt.
@@ -42,9 +42,22 @@ Netflix's permission request must remain directly tied to the user gesture. Do n
 6. Run synchronization and verify pagination, progress threshold, provider GUIDs, timestamps, and season/episode coordinates.
 7. Confirm session tokens, cookies, account IDs, and device IDs do not appear in logs.
 
+## Prime Video history
+
+1. Sign out of Prime Video and run sync; confirm a readable sign-in error appears without queue corruption.
+2. Sign in at `primevideo.com` in the same browser profile.
+3. Enable Prime Video and confirm Chrome requests both exact optional hosts in one native prompt.
+4. Run sync and confirm movies become movie events.
+5. Confirm season containers create one event per watched child episode and preserve each child's exact `time` value.
+6. Confirm canonical titles and structured season/episode coordinates come from `catalogMetadataV2` requested with `uxLocale=en_US`.
+7. Run sync again and confirm stable GTI + timestamp keys prevent duplicate queue growth.
+8. Stop and restart the service worker with Prime events queued; confirm the persistent queue resumes.
+9. Test a catalog-unavailable history item: cached metadata should be reused, while a cache miss should become unmatched without localized-title guessing.
+10. Confirm REMOVE actions/tokens, cookies, and temporary metadata device IDs do not appear in storage or logs.
+
 ## Synchronization and idempotency
 
-1. Enable Netflix and Crunchyroll.
+1. Enable Netflix, Crunchyroll, and Prime Video.
 2. Select **Sync now**.
 3. Confirm logs trace popup command, provider fetch, normalization, queueing, Simkl delivery, and resolver results.
 4. Run **Sync now** again.

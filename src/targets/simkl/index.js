@@ -75,6 +75,12 @@ function notFoundCount(result) {
 
 export async function sendWatchEvent(event, credentials, identity = null) {
   if (!credentials?.clientId || !credentials?.accessToken) throw new Error('Simkl is not connected.');
+  // A canonical-title provider must pass through the resolver before history is
+  // mutated. This prevents Simkl's permissive title matching from choosing a
+  // similarly named item when Prime supplies no Simkl-supported external ID.
+  if (!identity && event.metadata?.resolution?.requireUniqueMatch) {
+    return { result: { not_found: { deferred: true } }, matched: false, notFoundCount: 1, deferred: true };
+  }
   const version = chrome.runtime.getManifest().version;
   const url = `${API}/sync/history?app-name=watchbridge&app-version=${encodeURIComponent(version)}`;
   const result = await postJson(url, toPayload(event, identity), {

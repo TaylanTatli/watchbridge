@@ -37,6 +37,11 @@ function unmatchedRecord(item, resolution, finalReason) {
     providerDate,
     netflixDate: item.source === 'netflix' ? providerDate : null,
     candidateIds: normalizeIds(item.ids),
+    providerIdentity: {
+      gti: item.metadata?.[item.source]?.gti || '',
+      detailId: item.metadata?.[item.source]?.detailId || '',
+      seriesId: item.metadata?.[item.source]?.seriesId || ''
+    },
     season: item.season || null,
     episode: item.episode || null,
     attemptedStrategies: resolution.attempts || [],
@@ -97,7 +102,8 @@ export async function syncProvider(providerId = 'netflix') {
     if (!provider.capabilities?.historyBackfill) throw new Error(`${provider.label} does not support history backfill.`);
     if (!providerSettings?.enabled) throw new Error(`${provider.label} provider is disabled.`);
 
-    const hasPermission = await chrome.permissions.contains({ origins: [provider.permissionOrigin] });
+    const origins = provider.permissionOrigins || [provider.permissionOrigin];
+    const hasPermission = await chrome.permissions.contains({ origins });
     if (!hasPermission) throw new Error(`${provider.label} site permission is not granted. Click Enable ${provider.label} again.`);
 
     const simkl = await getSimkl();

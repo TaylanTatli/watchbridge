@@ -21,7 +21,7 @@ async function getState() {
   ]);
   const providerDefinitions = listProviders();
   const permissions = await Promise.all(providerDefinitions.map(provider => (
-    chrome.permissions.contains({ origins: [provider.permissionOrigin] })
+    chrome.permissions.contains({ origins: provider.permissionOrigins })
   )));
   const simklPermission = await chrome.permissions.contains({ origins: ['https://api.simkl.com/*'] });
   return {

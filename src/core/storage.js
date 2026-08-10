@@ -4,6 +4,7 @@ export const KEYS = Object.freeze({
   SYNC: 'watchbridge.sync',
   LOGS: 'watchbridge.logs',
   WATCH_STATE_CACHE: 'watchbridge.watchStateCache',
+  PRIME_METADATA_CACHE: 'watchbridge.primeMetadataCache',
   OAUTH_PENDING: 'watchbridge.oauth.pending',
   OAUTH_DRAFT_CLIENT_ID: 'watchbridge.oauth.draftClientId',
   OAUTH_DRAFT_SECRET: 'watchbridge.oauth.draftSecret'
@@ -14,7 +15,8 @@ const defaults = {
     intervalMinutes: 30,
     providers: {
       netflix: { enabled: false, threshold: 70, dimWatched: true },
-      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] }
+      crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] },
+      primevideo: { enabled: false, dimWatched: false }
     }
   },
   simkl: { clientId: '', accessToken: '' },
@@ -55,6 +57,10 @@ export async function getSettings() {
       crunchyroll: {
         ...defaults.settings.providers.crunchyroll,
         ...(storedProviders.crunchyroll || {})
+      },
+      primevideo: {
+        ...defaults.settings.providers.primevideo,
+        ...(storedProviders.primevideo || {})
       }
     }
   };
@@ -158,7 +164,7 @@ function redactSensitive(value) {
   if (!value || typeof value !== 'object') return value;
   const result = {};
   for (const [key, child] of Object.entries(value)) {
-    result[key] = /token|secret|authorization|cookie|session|password/i.test(key) ? '[redacted]' : redactSensitive(child);
+    result[key] = /token|secret|authorization|cookie|session|password|^actions?$|remove/i.test(key) ? '[redacted]' : redactSensitive(child);
   }
   return result;
 }
@@ -177,6 +183,15 @@ export async function getWatchStateCache() {
 
 export async function saveWatchStateCache(value) {
   await chrome.storage.local.set({ [KEYS.WATCH_STATE_CACHE]: value });
+  return value;
+}
+
+export async function getPrimeMetadataCache() {
+  return getLocal(KEYS.PRIME_METADATA_CACHE, {});
+}
+
+export async function savePrimeMetadataCache(value) {
+  await chrome.storage.local.set({ [KEYS.PRIME_METADATA_CACHE]: value });
   return value;
 }
 
