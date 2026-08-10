@@ -1,5 +1,5 @@
 [data-watchbridge-state="watched"] img {
-  opacity: 0.58;
+  opacity: 0.25;
   transition: opacity 160ms ease;
 }
 

@@ -103,10 +103,10 @@ test('Netflix and Crunchyroll adapters extract only stable URL identifiers', asy
   assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search?q=hero'), null);
 });
 
-test('decorator CSS lightly fades watched art and hover restores opacity', async () => {
+test('decorator CSS fades watched art and hover restores opacity', async () => {
   for (const file of ['netflix/content.css', 'crunchyroll/content.css']) {
     const css = await readFile(new URL(`../src/site-adapters/${file}`, import.meta.url), 'utf8');
-    assert.match(css, /opacity:\s*0\.58/);
+    assert.match(css, /opacity:\s*0\.25/);
     assert.match(css, /:hover img\s*\{\s*opacity:\s*1/);
     assert.doesNotMatch(css, /grayscale|!important/);
   }
