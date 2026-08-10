@@ -43,6 +43,16 @@ test('stale service workers produce a reload action instead of an empty provider
   assert.match(source, /chrome\.runtime\.reload\(\)/);
 });
 
+test('popup errors use an inline readable notice instead of clipped browser alerts', async () => {
+  const [source, html] = await Promise.all([
+    readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/ui/popup.html', import.meta.url), 'utf8')
+  ]);
+  assert.doesNotMatch(source, /\balert\s*\(/);
+  assert.match(source, /function showNotice/);
+  assert.match(html, /id="notice"[^>]*aria-live="polite"/);
+});
+
 test('every popup element referenced by ID exists in the HTML', async () => {
   const [source, html] = await Promise.all([
     readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8'),

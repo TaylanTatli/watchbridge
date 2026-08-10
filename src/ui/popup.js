@@ -20,6 +20,18 @@ function setBusy(button, busy, label) {
   if (label) button.textContent = label;
 }
 
+function showNotice(message, type = 'error') {
+  const notice = $('notice');
+  $('noticeText').textContent = String(message || 'Unknown error.');
+  notice.className = `notice ${type === 'success' ? 'success' : 'error'}`;
+  notice.hidden = false;
+  notice.scrollIntoView({ block: 'nearest' });
+}
+
+function hideNotice() {
+  $('notice').hidden = true;
+}
+
 function formatTime(iso) {
   if (!iso) return 'never';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
@@ -68,14 +80,14 @@ function bindProviderControls() {
     // IMPORTANT: the permission request is the first operation in this click handler.
     button.addEventListener('click', () => {
       chrome.permissions.request({ origins: [origin] }, async granted => {
-        if (chrome.runtime.lastError) return alert(chrome.runtime.lastError.message);
+        if (chrome.runtime.lastError) return showNotice(chrome.runtime.lastError.message);
         if (!granted) {
-          alert(`${label} site access was not granted.`);
+          showNotice(`${label} site access was not granted.`);
           await refresh();
           return;
         }
         const response = await send({ type: 'setProviderSettings', provider: providerId, patch: { enabled: true } });
-        if (!response.ok) alert(response.error); else render(response.state);
+        if (!response.ok) showNotice(response.error); else render(response.state);
       });
     });
   }
@@ -83,7 +95,7 @@ function bindProviderControls() {
   for (const button of document.querySelectorAll('[data-action="disable"]')) {
     button.addEventListener('click', async () => {
       const response = await send({ type: 'setProviderSettings', provider: button.dataset.provider, patch: { enabled: false } });
-      if (!response.ok) alert(response.error); else render(response.state);
+      if (!response.ok) showNotice(response.error); else render(response.state);
     });
   }
 
@@ -119,7 +131,12 @@ function bindProviderControls() {
     button.addEventListener('click', async () => {
       setBusy(button, true, 'Loading…');
       const response = await send({ type: 'refreshProviderProfiles', provider: button.dataset.provider });
-      if (!response.ok) alert(response.error); else render(response.state);
+      setBusy(button, false, 'Refresh');
+      if (!response.ok) showNotice(`${button.dataset.provider === 'crunchyroll' ? 'Crunchyroll: ' : ''}${response.error}`);
+      else {
+        render(response.state);
+        showNotice('Crunchyroll profiles refreshed.', 'success');
+      }
     });
   }
 }
@@ -215,6 +232,8 @@ $('clientSecret').addEventListener('input', () => {
   saveOAuthDraft({ clientSecret: $('clientSecret').value }).catch(() => {});
 });
 
+$('dismissNotice').addEventListener('click', hideNotice);
+
 $('interval').addEventListener('change', async () => {
   const response = await send({ type: 'setInterval', value: $('interval').value });
   if (response.ok) render(response.state);
@@ -224,11 +243,11 @@ $('connectSimkl').addEventListener('click', () => {
   // Same rule as Netflix: the optional host permission request happens directly in the click.
   chrome.permissions.request({ origins: [SIMKL_API_ORIGIN] }, async granted => {
     if (chrome.runtime.lastError) {
-      alert(chrome.runtime.lastError.message);
+      showNotice(chrome.runtime.lastError.message);
       return;
     }
     if (!granted) {
-      alert('Simkl API access was not granted.');
+      showNotice('Simkl API access was not granted.');
       return;
     }
 
@@ -240,13 +259,13 @@ $('connectSimkl').addEventListener('click', () => {
       clientSecret: $('clientSecret').value
     });
     setBusy(button, false, 'Connect Simkl');
-    if (!response.ok) alert(response.error);
+    if (!response.ok) showNotice(response.error);
   });
 });
 
 $('disconnectSimkl').addEventListener('click', async () => {
   const response = await send({ type: 'disconnectSimkl' });
-  if (!response.ok) alert(response.error); else render(response.state);
+  if (!response.ok) showNotice(response.error); else render(response.state);
 });
 
 $('syncNow').addEventListener('click', async () => {
@@ -254,7 +273,7 @@ $('syncNow').addEventListener('click', async () => {
   setBusy(button, true, 'Syncing…');
   // Do not block UI rendering on a long first import; periodic refresh shows persisted state.
   send({ type: 'syncNow' }).then(response => {
-    if (!response.ok) alert(response.error);
+    if (!response.ok) showNotice(response.error);
     refresh();
   });
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -264,7 +283,7 @@ $('syncNow').addEventListener('click', async () => {
 $('resetCheckpoint').addEventListener('click', async () => {
   if (!confirm('Reset checkpoints and re-read enabled provider histories on next sync?')) return;
   const response = await send({ type: 'resetCheckpoint' });
-  if (!response.ok) alert(response.error); else render(response.state);
+  if (!response.ok) showNotice(response.error); else render(response.state);
 });
 
 $('clearLogs').addEventListener('click', async () => {

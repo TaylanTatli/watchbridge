@@ -106,8 +106,11 @@ export function createCrunchyrollClient(fetchImpl = fetch) {
       headers: { Accept: 'text/html' }
     }, 20000, fetchImpl);
     const html = await pageResponse.text();
-    if (pageResponse.status === 401 || pageResponse.status === 403 || /log in|login-form/i.test(html)) {
+    if (pageResponse.status === 401 || /log in|login-form/i.test(html)) {
       throw new Error('Crunchyroll is not logged in in this browser profile.');
+    }
+    if (pageResponse.status === 403) {
+      throw new Error('Crunchyroll rejected the browser session (HTTP 403). Open crunchyroll.com in this Chrome profile, sign in or refresh the site, then try again.');
     }
     if (!pageResponse.ok) throw new Error(`Crunchyroll history page failed (HTTP ${pageResponse.status}).`);
 
