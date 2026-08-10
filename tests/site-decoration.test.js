@@ -107,6 +107,12 @@ test('Netflix, Crunchyroll, and Prime Video adapters extract only stable URL ide
     id: '0N0F0I1VSVSFT6K6MIE9K5XIRB', kind: 'title'
   });
   assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search/ref=atv_nb_sr'), null);
+  const primeCard = element();
+  const primeAnchor = { closest(selector) {
+    assert.equal(selector, 'article[data-testid="card"], [data-testid="card"][data-card-title]');
+    return primeCard;
+  } };
+  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.cardElement(primeAnchor), primeCard);
 });
 
 test('decorator CSS fades watched art and hover restores opacity', async () => {

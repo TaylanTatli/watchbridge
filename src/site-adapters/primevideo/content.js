@@ -9,17 +9,21 @@
     }
   }
 
+  function cardElement(anchor) {
+    return anchor.closest('article[data-testid="card"], [data-testid="card"][data-card-title]') || anchor;
+  }
+
   function scan() {
     const cards = [];
     for (const anchor of document.querySelectorAll('a[href*="/detail/"]')) {
       const identity = identityFromHref(anchor.getAttribute('href'));
       if (!identity) continue;
-      // Keep the visual state on the link itself. Prime's generated card class
-      // names change often, while the linked image remains inside this anchor.
-      cards.push({ ...identity, element: anchor });
+      // Prime keeps the detail link and packshot as siblings inside its stable
+      // card container, so styling the link itself cannot reach the image.
+      cards.push({ ...identity, element: cardElement(anchor) });
     }
     return cards;
   }
 
-  globalThis.WatchBridgeSiteAdapterConfig = { provider: 'primevideo', scan, identityFromHref };
+  globalThis.WatchBridgeSiteAdapterConfig = { provider: 'primevideo', scan, identityFromHref, cardElement };
 })();
