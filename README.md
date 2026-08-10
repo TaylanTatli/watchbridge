@@ -1,26 +1,119 @@
-# WatchBridge v0.1.3
+# WatchBridge
 
-WatchBridge is a Manifest V3 watch-history bridge:
+WatchBridge is a Chrome/Chromium extension that imports watch history from streaming services and synchronizes it with tracking platforms.
 
-    Netflix / Crunchyroll -> normalized WatchEvent -> persistent sync engine -> Simkl
+```text
+Netflix ──────┐
+              ├─> normalized WatchEvent ─> persistent sync engine ─> Simkl
+Crunchyroll ──┘
+```
 
-Providers and targets exchange only normalized events. Site decoration is a separate adapter layer and never puts streaming-site DOM selectors in the sync engine.
+The project is built around independent providers and targets. Streaming-site code does not know how Simkl works, and the Simkl target does not depend on Netflix or Crunchyroll internals.
 
-## Implemented
+> [!IMPORTANT]
+> WatchBridge is an unofficial project. Netflix and Crunchyroll history synchronization relies on private web APIs used by their own websites. Those endpoints can change without notice.
 
-- Netflix and Crunchyroll history backfill through the user's existing logged-in browser sessions.
-- Optional, per-site host access requested directly from each provider's **Enable** click.
-- Per-provider enablement, watched threshold, history checkpoint, profile configuration, and **Dim watched titles** setting.
-- Persistent queue, completed event keys, retries, dead letters, unmatched diagnostics, and stale worker-lock recovery in `chrome.storage.local`.
-- Simkl OAuth using the user's own developer application. No official Enhancer credentials are included or used.
-- Stable-ID resolver fallback, ISO-8601 conversion at the Simkl boundary, and safe per-season anime numbering.
-- Dynamically registered Netflix and Crunchyroll site decorators with debounced SPA observation.
-- Batched Simkl `/sync/watched` lookups with a ten-minute local cache.
-- Automatic sync through `chrome.alarms` (default 30 minutes).
+## Features
 
-## Provider capabilities
+- Netflix and Crunchyroll history import using the browser's existing signed-in session
+- Incremental synchronization with persistent, provider-specific checkpoints
+- Configurable watched threshold per provider
+- Deterministic event identity and duplicate-rescan suppression
+- Persistent queue, retries, dead letters, and unmatched diagnostics
+- Stable-ID resolution before any title-based fallback
+- Correct per-season numbering for resolved Simkl anime
+- Optional watched-title dimming on Netflix and Crunchyroll
+- Per-provider optional host permissions
+- Manifest V3 service-worker recovery
+- Simkl OAuth with session-only secret drafts and redacted logs
 
-Every registered provider declares only four capabilities:
+## Supported integrations
+
+| Integration | Role | Current support |
+|---|---|---|
+| Netflix | Provider | History backfill, incremental sync, site decoration |
+| Crunchyroll | Provider | History backfill, incremental sync, site decoration with episode limitations |
+| Simkl | Target | OAuth, history writes, identity resolution, authoritative watch-state lookup |
+
+Other streaming services are intentionally not exposed as placeholder providers. See [Future services](#future-services) for the current feasibility notes.
+
+## Installation
+
+WatchBridge is currently installed as an unpacked extension.
+
+1. Download or clone this repository.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Select **Load unpacked**.
+5. Choose the repository directory containing `manifest.json`.
+
+After pulling or editing extension files, use **Reload** on the WatchBridge card in `chrome://extensions`. This restarts the service worker and applies manifest changes.
+
+### Simkl setup
+
+WatchBridge does not contain or reuse credentials from Simkl's official extension. Create your own application from **Simkl Settings → Developer**.
+
+The manifest includes a fixed public extension key, so the expected unpacked extension ID is:
+
+```text
+enfmmbgafhlkglemjhkcfkaklhddgoan
+```
+
+Expected OAuth redirect URI:
+
+```text
+chrome-extension://enfmmbgafhlkglemjhkcfkaklhddgoan/src/ui/oauth.html
+```
+
+Use the redirect URI displayed in the popup if your runtime ID differs.
+
+### Enabling providers
+
+Netflix and Crunchyroll access is optional and is not granted during installation.
+
+1. Open the WatchBridge popup.
+2. Select **Enable Netflix** or **Enable Crunchyroll**.
+3. Accept Chrome's native site-access prompt.
+4. Configure the watched threshold and optional title dimming.
+
+The host-permission request is invoked directly by the button click. No worker round trip, hidden window, or awaited operation occurs before `chrome.permissions.request()`.
+
+For Crunchyroll, sign in on `crunchyroll.com` using the same Chrome profile, then select **Refresh** to load available profiles. WatchBridge never persists the short-lived Crunchyroll access token.
+
+## Usage
+
+### Synchronize history
+
+Connect Simkl, enable at least one provider, and select **Sync now**.
+
+WatchBridge will:
+
+1. Read new provider history after the stored checkpoint.
+2. Calculate playback progress and apply the configured threshold.
+3. Normalize eligible entries into `WatchEvent` objects.
+4. Suppress events already queued, completed, unmatched, or dead-lettered.
+5. Deliver the persistent queue to Simkl.
+6. Resolve `not_found` results only when a unique, stable identity is available.
+7. Advance the provider checkpoint only after the queue drains.
+
+Running **Sync now** repeatedly does not blindly enqueue the same historical events. Resetting checkpoints intentionally rescans history while retaining successful event keys.
+
+### Dim watched titles
+
+Enable **Dim watched titles** for a provider to lightly fade completed media cards. Images use `opacity: 0.58` and return to full opacity on hover.
+
+Site decorators are registered dynamically only when:
+
+- the provider's host permission is granted; and
+- title dimming is enabled for that provider.
+
+Visible IDs are deduplicated and queried in batches. Simkl `/sync/watched` is the authoritative source; local completed keys alone do not classify remote watch state.
+
+WatchBridge does not dim plan-to-watch, watching, on-hold, dropped, unresolved, or unmatched titles. A remote episode lookup requires safe canonical season and episode coordinates, so bare provider episode URLs are not guessed.
+
+## Architecture
+
+Providers declare a compact capability contract:
 
 ```js
 capabilities: {
@@ -31,181 +124,156 @@ capabilities: {
 }
 ```
 
-| Provider | History backfill | Incremental history | Playback scrobble | Site decoration |
-|---|---:|---:|---:|---:|
-| Netflix | yes | yes | no | yes |
-| Crunchyroll | yes | yes | no | yes, with the episode limitation below |
+This allows future integrations to be honest about what they support. A provider may eventually support browser playback scrobbling without claiming it can import watches performed on televisions or mobile devices.
 
-This contract allows a future browser-playback-only provider without pretending it can import viewing performed on televisions or mobile devices.
+### Normalized event
 
-## Install and Simkl setup
-
-1. Open `chrome://extensions`, enable **Developer mode**, and load this directory unpacked.
-2. Create your own application in **Simkl Settings -> Developer**. Never reuse credentials from Simkl's official extension.
-3. Configure the redirect URI shown in the popup and connect Simkl.
-4. Enable Netflix and/or Crunchyroll from the popup.
-
-The repository manifest has a fixed public extension key. Its expected unpacked ID is:
-
-    enfmmbgafhlkglemjhkcfkaklhddgoan
-
-Expected OAuth redirect URI:
-
-    chrome-extension://enfmmbgafhlkglemjhkcfkaklhddgoan/src/ui/oauth.html
-
-The Client ID draft persists locally so popup closure does not lose it. The Client Secret draft uses `chrome.storage.session` and is cleared after OAuth. Access tokens and secrets are recursively redacted from structured logs and are never displayed after connection.
-
-## Optional permissions
-
-Netflix, Crunchyroll, and Simkl API access are `optional_host_permissions`; neither streaming site is accessible at install time. The provider enable handler calls `chrome.permissions.request()` directly from the click, before any await, worker round trip, or hidden window.
-
-The regular `scripting` permission is used only to register a provider's decorator after both conditions are true:
-
-- that provider's optional host permission is granted;
-- **Dim watched titles** is enabled for that provider.
-
-Revoking site access removes the registration and existing WatchBridge visual state. Startup reconciliation restores required persistent registrations after a service-worker restart.
-
-## Crunchyroll history flow
-
-The provider uses the current logged-in `www.crunchyroll.com` browser session and the same private web API lineage used by Crunchyroll's web client:
-
-1. Load `/home/history` and discover the web client's `accountAuthClientId` from page configuration.
-2. Exchange the existing `etp_rt_cookie` session for a short-lived access token at `/auth/v1/token`.
-3. Fetch `/accounts/v1/me/multiprofile` and expose non-sensitive profile names/IDs in the popup.
-4. Fetch paginated `/content/v1/watch-history/{accountId}` records.
-5. Calculate progress from `fully_watched`, `playhead`, and `duration_ms`; apply the provider threshold.
-6. Preserve `date_played`, the original version GUID, and supplied season/episode coordinates in a normalized event.
-
-The Crunchyroll token, session cookie, account authentication client ID, and generated device ID are not persisted or logged. Only the selected profile ID and the non-sensitive discovered profile list persist. WatchBridge does not call an unverified private profile-switch endpoint: if the configured profile is not currently active on Crunchyroll, sync stops with instructions to switch profiles on the site rather than importing the wrong profile.
-
-These endpoints are private and can change without notice. Response parsing accepts the known current/legacy wrappers but fails with a concise format-change error when required fields are absent. Authenticated live validation is still required after any Crunchyroll site release.
-
-## Normalized WatchEvent
-
-Optional fields are populated only when the provider actually supplies them:
+Providers emit target-neutral events. Optional values are included only when supplied by the source.
 
 ```js
 {
   source: 'netflix' | 'crunchyroll',
   sourceId: 'provider-event-id',
   type: 'movie' | 'episode',
+
   title: '',
   seriesTitle: '',
   episodeTitle: '',
+
   season: number | null,
   episode: number | null,
   watchedAt: providerTimestamp,
   watchedAtMs: number | null,
   progress: number | null,
-  ids: { netflix?, crunchyroll?, simkl?, imdb?, tmdb?, tvdb?, mal? },
+
+  ids: {
+    netflix?: string,
+    crunchyroll?: string,
+    simkl?: number,
+    imdb?: string,
+    tmdb?: string,
+    tvdb?: string,
+    mal?: string
+  },
+
   metadata: {
     watchedAtUnit: 'unix_seconds' | 'iso_8601',
-    episodeNumbering: 'season_episode' | null,
-    netflix?: {},
-    crunchyroll?: {}
+    episodeNumbering: 'season_episode' | null
   }
 }
 ```
 
-`source + sourceId + watchedAt` is the deterministic local identity. WatchBridge never manufactures a watched timestamp. The Simkl target converts the provider-native value to ISO-8601 only while building the outgoing payload, leaving `watchEventKey` stable.
+The deterministic local identity is:
 
-Checkpoints are provider-specific and Crunchyroll checkpoints are profile-specific. They advance only after the persistent queue drains. Resetting checkpoints intentionally rescans enabled providers but retains successful event keys, preventing a blind duplicate queue explosion across worker restarts.
+```text
+source + sourceId + watchedAt
+```
 
-## Resolver and anime numbering
+Provider timestamps are never synthesized. The Simkl target converts them to ISO-8601 only when constructing the outgoing request.
 
-The first Simkl history write sends every real stable ID on the event. On `not_found`, the resolver tries the item provider ID and then a supplied stable parent-series provider ID. It accepts only one compatible canonical result. There is no translation dictionary or fuzzy title guessing.
+### Resolver behavior
 
-An episode retry also requires real provider season/episode coordinates. When the canonical result is anime and `metadata.episodeNumbering` is `season_episode`, the Simkl payload adds `use_tvdb_anime_seasons=true`. Normal TV payloads remain unchanged. A Netflix `S02E01` or Crunchyroll `S02E04` therefore cannot silently become AniDB-style flat episode numbering.
+When Simkl returns `not_found`, WatchBridge:
 
-Unresolved and ambiguous entries remain unmatched with source, provider ID, localized title, series/episode title, provider date, candidate IDs, coordinates, attempted strategies, and final reason. Popup logs stay concise.
+1. Tries the strongest available provider or external ID.
+2. Tries a supplied stable parent-series ID when appropriate.
+3. Accepts only one compatible canonical result.
+4. Requires real season and episode coordinates for episode retries.
+5. Leaves ambiguous or unresolved entries unmatched.
 
-For `Kahramanlık Akademim`, a unique Netflix episode or parent-series ID match can resolve to the canonical My Hero Academia Simkl ID and retry safely. If those IDs do not resolve uniquely, it remains unmatched; the Turkish title is never used to guess an English one.
+There is no localized-title dictionary or fuzzy guessing. Resolved anime using provider per-season coordinates are sent with Simkl's `use_tvdb_anime_seasons=true`; normal television payloads are unchanged.
 
-## Site decoration
+### Project layout
 
-Provider adapters extract only stable IDs from visible links:
+```text
+src/
+  core/
+    provider-registry.js
+    sync-engine.js
+    storage.js
+    resolver.js
+    watch-state.js
+    site-decoration.js
+    types.js
+  providers/
+    netflix/
+    crunchyroll/
+  site-adapters/
+    netflix/
+    crunchyroll/
+    runtime.js
+  targets/
+    simkl/
+  ui/
+  background.js
+```
 
-- Netflix: `jbv`, `/title/{id}`, and `/watch/{id}` numeric IDs.
-- Crunchyroll: `/series/{GUID}` and `/watch/{GUID}` IDs.
+## Privacy and security
 
-The content runtime deduplicates visible IDs, sends one background batch, observes SPA mutations with debounce, and applies only `data-watchbridge-state="watched"`. CSS lightly fades images to `opacity: 0.58` and restores opacity on hover. It does not alter layout, click targets, labels, or dimensions.
+- Streaming-site host access is optional and requested per provider.
+- Simkl OAuth uses credentials supplied by the user.
+- Client secrets are stored only in `chrome.storage.session` while needed for OAuth.
+- OAuth access tokens, client secrets, cookies, and authorization headers are recursively redacted from structured logs.
+- Crunchyroll session tokens and generated device IDs are not persisted.
+- The popup never displays the raw Simkl Client ID after connection.
+- WatchBridge requests no permissions for unsupported streaming platforms.
 
-Simkl is authoritative through `POST /sync/watched`; `completedKeys` alone never decides remote state. A title card is dimmed only when Simkl reports `list: "completed"`. `watching`, plan-to-watch, dropped, on-hold, `false`, and `not_found` are left untouched.
+## Known limitations
 
-Simkl documents that a guaranteed episode lookup requires canonical identification plus explicit `season` and `episode`. Visible provider `/watch/{id}` links do not expose those coordinates reliably, so WatchBridge does not guess a remote episode state from the ID alone. An episode card can be updated immediately after WatchBridge successfully syncs that exact provider event. A future metadata cache can safely extend manual-episode decoration once it can supply canonical coordinates.
+- Netflix and Crunchyroll history endpoints are private and may change.
+- Netflix provider-ID lookup is documented by Simkl as beta.
+- WatchBridge does not invoke an unverified Crunchyroll profile-switch endpoint. The selected profile must be active on Crunchyroll.
+- Remote episode decoration remains conservative when a visible card does not expose safe canonical coordinates.
+- Playback scrobbling is not implemented; current providers import recorded history.
+- Live integration tests require signed-in provider sessions and personal Simkl OAuth credentials.
 
-## Streaming-service feasibility
+## Future services
 
-| Service | History backfill | Browser scrobble | Site dimming | WatchBridge status |
+| Service | History backfill | Browser scrobble | Site decoration | Current status |
 |---|---|---|---|---|
-| Netflix | available | future | available | implemented |
-| Crunchyroll | available | future | stable IDs; episode state conditional | implemented |
-| Prime Video | no stable accurate source verified | research possible | research possible | no permission requested |
-| Disney+ | no accessible history source verified | research possible | research possible | no permission requested |
-| Hulu | no accessible history source verified | research possible | research possible | no permission requested |
-| Max | no accessible history source verified | research possible | research possible | no permission requested |
+| Prime Video | No stable accurate source verified | Research possible | Research possible | No permission requested |
+| Disney+ | No accessible history source verified | Research possible | Research possible | No permission requested |
+| Hulu | No accessible history source verified | Research possible | Research possible | No permission requested |
+| Max | No accessible history source verified | Research possible | Research possible | No permission requested |
 
-This conservative matrix follows Simkl's current import guidance, which identifies Netflix and Crunchyroll history as accessible while noting the lack of stable/accurate import sources for the other services: <https://docs.simkl.org/how-to-use-simkl/advanced-usage/import-export-data/importing-to-simkl/faq-troubleshooting/is-there-a-way-to-import-data-from-streaming-services-directly-like-netflix-amazon-video-or-disney>.
+The next low-risk provider candidate is a CSV importer because it exercises non-browser ingestion without depending on another private streaming API. A second tracking target such as Trakt would test the target abstraction independently.
 
-No unsupported platform permission or placeholder provider is included.
+## Development
 
-## Structure
+Requirements:
 
-    src/
-      core/
-        provider-registry.js
-        sync-engine.js
-        storage.js
-        resolver.js
-        watch-state.js
-        site-decoration.js
-        types.js
-      providers/
-        netflix/index.js
-        crunchyroll/index.js
-      site-adapters/
-        runtime.js
-        netflix/content.js + content.css
-        crunchyroll/content.js + content.css
-      targets/simkl/
-        index.js
-        oauth.js
-        resolver.js
-      ui/
-        popup.html / popup.js / popup.css
-        oauth.html / oauth.js
-      background.js
+- A current Node.js release
+- Chrome or Chromium with Manifest V3 support
 
-## API references and assumptions
+Run the test suite:
 
-- Simkl standard IDs: <https://api.simkl.org/conventions/standard-media-objects>
-- Simkl ID search: <https://api.simkl.org/api-reference/simkl/search-by-id>
-- Add history: <https://api.simkl.org/api-reference/simkl/add-to-history>
-- Watched lookup: <https://api.simkl.org/api-reference/simkl/get-watched>
-- Crunchyroll stable public series/watch URL forms are current, but its session/history endpoints are private and undocumented.
+```bash
+npm test
+```
 
-## Validation
+Check every JavaScript file:
 
-Automated checks:
+```bash
+find src tests -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+```
 
-    npm test
-    find src tests -type f -name '*.js' -print0 | xargs -0 -n1 node --check
-    node -e "JSON.parse(require('fs').readFileSync('manifest.json')); console.log('manifest valid')"
+Validate the manifest JSON:
 
-Manual release procedure:
+```bash
+node -e "JSON.parse(require('fs').readFileSync('manifest.json')); console.log('manifest valid')"
+```
 
-1. Fresh-load the extension. Confirm neither Netflix nor Crunchyroll host access is granted.
-2. Click **Enable Netflix**. Denial must leave it disabled; acceptance must show Chrome's native prompt and then `Granted`.
-3. Repeat for Crunchyroll. Verify the two providers enable/disable independently.
-4. With Crunchyroll logged out, run sync and confirm a useful `[Crunchyroll]` error while queued work remains intact.
-5. Log into Crunchyroll, refresh profiles, select the active profile, and sync. Confirm pagination, scanned/eligible counters, real GUIDs, progress threshold, and provider timestamp in stored events.
-6. Connect a personal Simkl application. Close/reopen the popup during credential entry; Client ID and session-only secret drafts must return. Complete OAuth and confirm the secret field is cleared and no token/secret appears in logs.
-7. Enable both historical providers and click **Sync now**. Confirm logs trace command, each provider fetch/normalization, queue, Simkl delivery, and resolver outcomes.
-8. Run **Sync now** twice. Queue size must not grow blindly and completed keys must suppress identical events.
-9. Stop/restart the service worker with queued work. Confirm the stale lock clears, retries/queue survive, and the queue resumes.
-10. Visit Netflix browse pages. Simkl-completed titles should fade lightly; hovering restores full opacity. SPA navigation should discover new cards without continuous polling.
-11. Sync a newly visible title/episode and confirm its state refreshes without reloading the extension.
-12. Repeat on Crunchyroll series cards. Episode cards without safe coordinate mapping must remain untouched rather than guessed.
-13. Turn off **Dim watched titles** and confirm attributes are removed. Re-enable it and restart the worker; registration should recover. Revoke host access and confirm the registered content script is removed.
-14. Confirm a multi-season anime retry includes `use_tvdb_anime_seasons=true`, while a normal TV `S02E01` payload remains unchanged.
+The full browser release checklist is in [docs/manual-testing.md](docs/manual-testing.md).
+
+## API references
+
+- [Simkl standard media objects](https://api.simkl.org/conventions/standard-media-objects)
+- [Simkl external-ID search](https://api.simkl.org/api-reference/simkl/search-by-id)
+- [Simkl add to history](https://api.simkl.org/api-reference/simkl/add-to-history)
+- [Simkl watched lookup](https://api.simkl.org/api-reference/simkl/get-watched)
+- [Chrome dynamic content scripts](https://developer.chrome.com/docs/extensions/reference/api/scripting)
+- [Chrome optional permissions](https://developer.chrome.com/docs/extensions/reference/api/permissions)
+
+## Contributing
+
+Focused bug reports and pull requests are welcome. For provider issues, include the provider name, concise WatchBridge logs, and whether the relevant site is signed in—never include cookies, OAuth tokens, client secrets, or authorization headers.
