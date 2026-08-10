@@ -1,4 +1,4 @@
-import { getSettings, saveSettings, getSimkl, clearSimklToken, getSyncState, getLogs, clearLogs, addLog, getOAuthDraft } from './core/storage.js';
+import { getSettings, saveSettings, getSimkl, clearSimklToken, getSyncState, getLogs, clearLogs, addLog, getOAuthDraft, recoverInterruptedSyncState } from './core/storage.js';
 import { syncProvider, resetCheckpoint } from './core/sync-engine.js';
 import { beginOAuth, finishOAuth, redirectUri } from './targets/simkl/oauth.js';
 import { getProvider } from './core/provider-registry.js';
@@ -33,12 +33,16 @@ async function getState() {
   };
 }
 
+const startup = recoverInterruptedSyncState().then(ensureAlarm);
+
 chrome.runtime.onInstalled.addListener(async () => {
+  await startup;
   await ensureAlarm();
-  await addLog('info', `WatchBridge ${chrome.runtime.getManifest().version} installed.`);
+  await addLog('info', `[WatchBridge] Version ${chrome.runtime.getManifest().version} installed.`);
 });
 
 chrome.alarms.onAlarm.addListener(async alarm => {
+  await startup;
   if (alarm.name !== ALARM) return;
   const settings = await getSettings();
   if (!settings.netflixEnabled) return;
@@ -50,6 +54,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
+      await startup;
       switch (message?.type) {
         case 'getState':
           sendResponse({ ok: true, state: await getState() });
@@ -88,6 +93,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'syncNow':
           // Keep this message event alive for the sync job. The popup may close; the worker continues.
+          await addLog('info', '[WatchBridge] Sync Now command received from popup.');
           await syncProvider('netflix');
           sendResponse({ ok: true, state: await getState() });
           return;
@@ -106,11 +112,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: 'Unknown message.' });
       }
     } catch (error) {
-      await addLog('error', 'Background action failed.', { action: message?.type, error: error.message || String(error) });
+      await addLog('error', '[WatchBridge] Background action failed.', { action: message?.type, error: error.message || String(error) });
       sendResponse({ ok: false, error: error.message || String(error) });
     }
   })();
   return true;
 });
 
-ensureAlarm().catch(() => {});
+startup.catch(() => {});

@@ -44,7 +44,7 @@ export async function finishOAuth({ code, state, error }) {
     });
     if (!result?.access_token) throw new Error(result?.error || 'Simkl token response did not contain access_token.');
     await saveSimkl({ clientId: pending.clientId, accessToken: result.access_token });
-    await addLog('info', 'Simkl connected successfully.');
+    await addLog('info', '[Simkl] OAuth connected successfully.');
     return true;
   } finally {
     // Never persist the client secret beyond the OAuth exchange.

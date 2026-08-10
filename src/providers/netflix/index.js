@@ -1,4 +1,5 @@
 import { getText, postFormJson } from '../../core/http.js';
+import { createWatchEvent } from '../../core/types.js';
 
 const VIEWING_ACTIVITY = 'https://www.netflix.com/WiViewingActivity';
 const HISTORY_ENDPOINT = 'https://www.netflix.com/api/aui/pathEvaluator/web/^2.0.0';
@@ -30,7 +31,9 @@ async function fetchHistoryPage(guid, page) {
 async function fetchProgress(ids) {
   if (!ids.length) return {};
   const raw = await postFormJson(PROGRESS_ENDPOINT, {
-    path: JSON.stringify(['videos', ids.map(String), ['summary', 'runtime', 'bookmarkPosition']])
+    path: JSON.stringify(['videos', ids.map(String), [
+      'summary', 'runtime', 'bookmarkPosition', 'seasonNumber', 'episodeNumber'
+    ]])
   });
 
   const result = {};
@@ -38,12 +41,20 @@ async function fetchProgress(ids) {
   for (const id of ids.map(String)) {
     const video = videos[id];
     if (!video) continue;
+    const summary = video.summary?.value || {};
     result[id] = {
       runtime: Number(video.runtime?.value || 0),
-      bookmark: Number(video.bookmarkPosition?.value ?? -1)
+      bookmark: Number(video.bookmarkPosition?.value ?? -1),
+      season: positiveInteger(video.seasonNumber?.value ?? summary.seasonNumber),
+      episode: positiveInteger(video.episodeNumber?.value ?? summary.episodeNumber)
     };
   }
   return result;
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 function normalize(item, progress) {
@@ -52,9 +63,10 @@ function normalize(item, progress) {
   const percent = runtime > 0 && bookmark >= 0 ? (bookmark * 100 / runtime) : 0;
   const isMovie = !item.series;
 
-  return {
+  const sourceId = String(item.movieID);
+  return createWatchEvent({
     source: 'netflix',
-    sourceId: String(item.movieID),
+    sourceId,
     type: isMovie ? 'movie' : 'episode',
     title: item.title || item.episodeTitle || '',
     seriesTitle: item.seriesTitle || '',
@@ -63,11 +75,17 @@ function normalize(item, progress) {
     watchedAt: Math.round(Number(item.date) / 1000),
     watchedAtMs: Number(item.date),
     progress: percent,
-    raw: {
-      parentId: item.series ? String(item.series) : '',
-      netflixTitle: item.title || ''
+    // Do not treat Netflix season/episode catalog IDs as ordinal numbers.
+    season: positiveInteger(item.seasonNumber ?? progress.season),
+    episode: positiveInteger(item.episodeNumber ?? progress.episode),
+    ids: { netflix: sourceId },
+    metadata: {
+      netflix: {
+        seriesId: item.series ? String(item.series) : '',
+        localizedTitle: item.title || item.seriesTitle || ''
+      }
     }
-  };
+  });
 }
 
 async function fetchEvents({ afterMs = 0, threshold = 70, maxPages = 500 } = {}) {

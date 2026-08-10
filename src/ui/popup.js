@@ -51,6 +51,7 @@ function render(next) {
   } else if (state.simkl.connected && state.simkl.clientId) {
     $('clientId').value = state.simkl.clientId;
   }
+  if (state.simkl.connected) $('clientSecret').value = '';
   $('simklDisconnected').hidden = state.simkl.connected;
   $('simklConnected').hidden = !state.simkl.connected;
 
@@ -78,6 +79,7 @@ function render(next) {
     `<strong>Sent:</strong> ${s.sent ?? 0}`,
     `<strong>&lt; threshold:</strong> ${s.skippedUnderThreshold ?? 0}`,
     `<strong>Unmatched:</strong> ${s.unmatched ?? 0}`,
+    `<strong>Stored unmatched:</strong> ${sync.unmatchedRecords?.length ?? 0}`,
     `<strong>Queue:</strong> ${sync.queue?.length ?? 0}`,
     `<strong>Dead:</strong> ${sync.deadLetters?.length ?? 0}`
   ].join(' · ') : 'No sync yet.';

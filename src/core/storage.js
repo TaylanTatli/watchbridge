@@ -19,6 +19,7 @@ const defaults = {
     queue: [],
     completedKeys: [],
     deadLetters: [],
+    unmatchedRecords: [],
     lastStats: null,
     lastError: ''
   }
@@ -57,6 +58,11 @@ export async function clearSimklToken() {
 
 export async function getSyncState() {
   const state = await getLocal(KEYS.SYNC, defaults.sync);
+  // Additive migrations for state written by earlier extension versions.
+  state.queue = Array.isArray(state.queue) ? state.queue : [];
+  state.completedKeys = Array.isArray(state.completedKeys) ? state.completedKeys : [];
+  state.deadLetters = Array.isArray(state.deadLetters) ? state.deadLetters : [];
+  state.unmatchedRecords = Array.isArray(state.unmatchedRecords) ? state.unmatchedRecords : [];
   // A worker can be killed mid-sync. Do not display a stale lock forever.
   if (state.running && Date.now() - (state.runningSince || 0) > 10 * 60 * 1000) {
     state.running = false;
@@ -64,6 +70,18 @@ export async function getSyncState() {
     state.lastError = 'Previous sync was interrupted; the persistent queue will resume.';
     await saveSyncState(state);
   }
+  return state;
+}
+
+export async function recoverInterruptedSyncState() {
+  const state = await getLocal(KEYS.SYNC, defaults.sync);
+  if (!state.running) return state;
+  state.running = false;
+  state.runningSince = 0;
+  state.phase = 'interrupted';
+  state.lastError = 'Previous sync was interrupted; the persistent queue will resume.';
+  await saveSyncState(state);
+  await addLog('warn', '[Queue] Previous worker stopped; persistent queued work was preserved.');
   return state;
 }
 
@@ -79,9 +97,19 @@ export async function patchSyncState(patch) {
 
 export async function addLog(level, message, data = null) {
   const logs = await getLocal(KEYS.LOGS, []);
-  logs.unshift({ at: new Date().toISOString(), level, message, data });
+  logs.unshift({ at: new Date().toISOString(), level, message, data: redactSensitive(data) });
   logs.splice(100);
   await chrome.storage.local.set({ [KEYS.LOGS]: logs });
+}
+
+function redactSensitive(value) {
+  if (Array.isArray(value)) return value.map(redactSensitive);
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  for (const [key, child] of Object.entries(value)) {
+    result[key] = /token|secret|authorization/i.test(key) ? '[redacted]' : redactSensitive(child);
+  }
+  return result;
 }
 
 export async function getLogs() {

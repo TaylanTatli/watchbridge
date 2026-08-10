@@ -1,0 +1,101 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+function storageArea() {
+  const values = new Map();
+  return {
+    async get(key) {
+      if (typeof key === 'string') return { [key]: values.get(key) };
+      return Object.fromEntries(values);
+    },
+    async set(entries) {
+      for (const [key, value] of Object.entries(entries)) values.set(key, structuredClone(value));
+    },
+    async remove(key) {
+      for (const item of Array.isArray(key) ? key : [key]) values.delete(item);
+    }
+  };
+}
+
+test('manifest keeps Netflix optional and requests no broad host access', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.manifest_version, 3);
+  assert.deepEqual(manifest.permissions, ['storage', 'alarms']);
+  assert.deepEqual(manifest.optional_host_permissions, [
+    'https://www.netflix.com/*',
+    'https://api.simkl.com/*'
+  ]);
+});
+
+test('Netflix permission request remains the first operation in its click handler', async () => {
+  const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
+  assert.match(source, /\$\('enableNetflix'\)\.addEventListener\('click', \(\) => \{\s*chrome\.permissions\.request/);
+});
+
+test('every popup element referenced by ID exists in the HTML', async () => {
+  const [source, html] = await Promise.all([
+    readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/ui/popup.html', import.meta.url), 'utf8')
+  ]);
+  const referenced = [...source.matchAll(/\$\('([^']+)'\)/g)].map(match => match[1]);
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  assert.deepEqual([...new Set(referenced)].filter(id => !ids.has(id)), []);
+});
+
+test('fresh settings are disabled and OAuth secret drafts stay session-only', async () => {
+  globalThis.chrome = { storage: { local: storageArea(), session: storageArea() } };
+  const storage = await import('../src/core/storage.js');
+
+  assert.deepEqual(await storage.getSettings(), {
+    netflixEnabled: false,
+    threshold: 70,
+    intervalMinutes: 30
+  });
+
+  await storage.saveOAuthDraft({ clientId: 'public-client-id', clientSecret: 'temporary-secret' });
+  assert.deepEqual(await storage.getOAuthDraft(), {
+    clientId: 'public-client-id',
+    clientSecret: 'temporary-secret'
+  });
+  await storage.clearOAuthSecretDraft();
+  assert.deepEqual(await storage.getOAuthDraft(), {
+    clientId: 'public-client-id',
+    clientSecret: ''
+  });
+});
+
+test('structured log data redacts token and secret fields', async () => {
+  globalThis.chrome = { storage: { local: storageArea(), session: storageArea() } };
+  const storage = await import('../src/core/storage.js');
+  await storage.addLog('info', '[WatchBridge] test', {
+    accessToken: 'must-not-survive',
+    nested: { clientSecret: 'must-not-survive' },
+    safe: 'visible'
+  });
+  const [log] = await storage.getLogs();
+  assert.equal(log.data.accessToken, '[redacted]');
+  assert.equal(log.data.nested.clientSecret, '[redacted]');
+  assert.equal(log.data.safe, 'visible');
+});
+
+test('worker startup recovery clears a stale lock without losing queued work', async () => {
+  globalThis.chrome = { storage: { local: storageArea(), session: storageArea() } };
+  const storage = await import('../src/core/storage.js');
+  const queued = { key: 'netflix:1:2', retries: 1 };
+  await storage.saveSyncState({
+    running: true,
+    runningSince: Date.now(),
+    phase: 'sending',
+    queue: [queued],
+    completedKeys: [],
+    deadLetters: [],
+    unmatchedRecords: []
+  });
+
+  const recovered = await storage.recoverInterruptedSyncState();
+  assert.equal(recovered.running, false);
+  assert.equal(recovered.phase, 'interrupted');
+  assert.deepEqual(recovered.queue, [queued]);
+  assert.equal(recovered.queue[0].retries, 1);
+});

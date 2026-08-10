@@ -1,21 +1,59 @@
 import { getProvider } from './provider-registry.js';
 import { getSettings, getSimkl, getSyncState, saveSyncState, addLog } from './storage.js';
-import { sendWatchEvent } from '../targets/simkl/index.js';
+import { compactWatchEvent, normalizeIds, watchEventKey } from './types.js';
+import { resolveForTarget } from './resolver.js';
+import { simklTarget } from '../targets/simkl/index.js';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const MAX_COMPLETED_KEYS = 20000;
+const MAX_UNMATCHED_RECORDS = 1000;
 let inProcess = false;
-
-function keyFor(event) {
-  return `${event.source}:${event.sourceId}:${event.watchedAt}`;
-}
-
-function compactEvent(event) {
-  const { raw, watchedAtMs, ...rest } = event;
-  return { ...rest, watchedAtMs, key: keyFor(event), retries: 0 };
-}
 
 function isTransient(error) {
   return !error?.status || error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+function rememberCompleted(state, key) {
+  if (!state.completedKeys.includes(key)) state.completedKeys.push(key);
+  if (state.completedKeys.length > MAX_COMPLETED_KEYS) {
+    state.completedKeys.splice(0, state.completedKeys.length - MAX_COMPLETED_KEYS);
+  }
+}
+
+function unmatchedRecord(item, resolution, finalReason) {
+  const dateMs = Number(item.watchedAtMs || 0);
+  return {
+    key: item.key,
+    source: item.source,
+    sourceId: item.sourceId,
+    localizedNetflixTitle: item.metadata?.netflix?.localizedTitle || item.title || '',
+    seriesTitle: item.seriesTitle || '',
+    episodeTitle: item.episodeTitle || '',
+    netflixDate: dateMs > 0 ? new Date(dateMs).toISOString() : item.watchedAt,
+    candidateIds: normalizeIds(item.ids),
+    season: item.season || null,
+    episode: item.episode || null,
+    attemptedStrategies: resolution.attempts || [],
+    finalReason,
+    failedAt: Date.now()
+  };
+}
+
+export function enqueueNewEvents(state, events) {
+  const queuedKeys = new Set(state.queue.map(item => item.key));
+  const completed = new Set(state.completedKeys || []);
+  const deadKeys = new Set((state.deadLetters || []).map(item => item.key));
+  const unmatchedKeys = new Set((state.unmatchedRecords || []).map(item => item.key));
+  let added = 0;
+
+  for (const event of events) {
+    const key = watchEventKey(event);
+    if (queuedKeys.has(key) || completed.has(key) || deadKeys.has(key) || unmatchedKeys.has(key)) continue;
+    state.queue.push(compactWatchEvent(event));
+    queuedKeys.add(key);
+    added++;
+  }
+  return added;
 }
 
 export async function syncProvider(providerId = 'netflix') {
@@ -57,40 +95,62 @@ export async function syncProvider(providerId = 'netflix') {
     if (!simkl.clientId || !simkl.accessToken) throw new Error('Connect Simkl first.');
 
     const checkpoint = Number(state.lastCommittedMs || 0);
+    await addLog('info', '[Netflix] Fetching viewing history.', { checkpoint });
     const fetched = await provider.fetchEvents({ afterMs: checkpoint, threshold: Number(settings.threshold || 70) });
     stats.scanned = fetched.scanned;
     stats.eligible = fetched.events.length;
     stats.skippedUnderThreshold = fetched.skippedUnderThreshold;
+    await addLog('info', '[Netflix] History fetched and normalized.', {
+      scanned: stats.scanned,
+      eligible: stats.eligible,
+      skippedUnderThreshold: stats.skippedUnderThreshold
+    });
 
     state = await getSyncState();
-    const queuedKeys = new Set(state.queue.map(item => item.key));
-    const completed = new Set(state.completedKeys || []);
-    const deadKeys = new Set((state.deadLetters || []).map(item => item.key));
-
-    for (const event of fetched.events) {
-      const key = keyFor(event);
-      if (queuedKeys.has(key) || completed.has(key) || deadKeys.has(key)) continue;
-      state.queue.push(compactEvent(event));
-      queuedKeys.add(key);
-      stats.queued++;
-    }
+    stats.queued = enqueueNewEvents(state, fetched.events);
 
     state.phase = 'sending';
     await saveSyncState(state);
+    await addLog('info', '[Queue] Events ready for delivery.', { added: stats.queued, queueSize: state.queue.length });
+    if (state.queue.length) {
+      await addLog('info', '[Simkl] Sending queued events to sync history.', { queueSize: state.queue.length });
+    }
 
     while (state.queue.length) {
       const item = state.queue[0];
       try {
-        const sent = await sendWatchEvent(item, simkl);
+        let sent = await simklTarget.sendWatchEvent(item, simkl);
+        let resolution = { identity: null, attempts: [], reason: '' };
+        if (!sent.matched) {
+          await addLog('warn', `[Resolver] Primary Simkl match failed for ${item.seriesTitle || item.title}.`, { key: item.key });
+          resolution = await resolveForTarget(item, simklTarget, simkl, sent.result);
+          if (resolution.identity) {
+            await addLog('info', `[Resolver] Resolved ${item.seriesTitle || item.title} with a stable Simkl identity.`, {
+              key: item.key,
+              strategy: resolution.identity.strategy,
+              simkl: resolution.identity.ids.simkl
+            });
+            sent = await simklTarget.sendWatchEvent(item, simkl, resolution.identity);
+            if (!sent.matched) {
+              resolution.attempts.push({ strategy: 'sync_history_resolved_retry', outcome: 'not_found' });
+              resolution.reason = 'Simkl rejected the high-confidence resolved identity on retry.';
+            }
+          }
+        }
+
         if (sent.matched) {
           stats.sent++;
-          state.completedKeys.push(item.key);
-          await addLog('info', `Synced ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
+          rememberCompleted(state, item.key);
+          await addLog('info', `[Simkl] Synced ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
         } else {
           stats.unmatched++;
-          state.deadLetters.unshift({ ...item, failedAt: Date.now(), reason: 'Simkl not_found' });
-          state.deadLetters.splice(1000);
-          await addLog('warn', `Simkl could not match ${item.seriesTitle || item.title}`, { key: item.key });
+          const reason = resolution.reason || 'Simkl returned not_found and no safe fallback identity was available.';
+          state.unmatchedRecords.unshift(unmatchedRecord(item, resolution, reason));
+          state.unmatchedRecords.splice(MAX_UNMATCHED_RECORDS);
+          await addLog('warn', `[Resolver] Unmatched ${item.type}: ${item.seriesTitle || item.title}`, {
+            key: item.key,
+            reason
+          });
         }
         state.queue.shift();
         await saveSyncState(state);
@@ -113,7 +173,7 @@ export async function syncProvider(providerId = 'netflix') {
           state.deadLetters.splice(1000);
           state.queue.shift();
           await saveSyncState(state);
-          await addLog('error', `Giving up on ${item.seriesTitle || item.title}`, { error: item.lastError, key: item.key });
+          await addLog('error', `[Queue] Giving up on ${item.seriesTitle || item.title}`, { error: item.lastError, key: item.key });
           continue;
         }
 
@@ -124,19 +184,18 @@ export async function syncProvider(providerId = 'netflix') {
 
     // Only advance the checkpoint after the persistent queue has drained.
     if (fetched.newestMs > checkpoint) state.lastCommittedMs = fetched.newestMs;
-    state.completedKeys = [];
     state.phase = 'done';
     state.lastStats = { ...stats, finishedAt: new Date().toISOString() };
     state.lastError = '';
     await saveSyncState(state);
-    await addLog('info', 'Sync completed.', state.lastStats);
+    await addLog('info', '[WatchBridge] Sync completed.', state.lastStats);
   } catch (error) {
     state = await getSyncState();
     state.phase = 'error';
     state.lastError = error.message || String(error);
     state.lastStats = { ...stats, finishedAt: new Date().toISOString() };
     await saveSyncState(state);
-    await addLog('error', 'Sync failed.', { error: state.lastError });
+    await addLog('error', '[WatchBridge] Sync failed.', { error: state.lastError });
   } finally {
     state = await getSyncState();
     state.running = false;
@@ -151,10 +210,10 @@ export async function resetCheckpoint() {
   if (state.running) throw new Error('Cannot reset while syncing.');
   state.lastCommittedMs = 0;
   state.queue = [];
-  state.completedKeys = [];
   state.deadLetters = [];
+  state.unmatchedRecords = [];
   state.lastError = '';
   state.phase = 'idle';
   await saveSyncState(state);
-  await addLog('warn', 'Sync checkpoint reset. Next sync will re-read full Netflix history.');
+  await addLog('warn', '[WatchBridge] History checkpoint reset. Successful event keys were retained for idempotency.');
 }

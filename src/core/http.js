@@ -19,6 +19,20 @@ export async function getText(url, headers = {}) {
   return response.text();
 }
 
+export async function getJson(url, headers = {}) {
+  const response = await fetchWithTimeout(url, { method: 'GET', headers });
+  const text = await response.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status} ${response.statusText}`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+}
+
 export async function postFormJson(url, data, headers = {}) {
   const response = await fetchWithTimeout(url, {
     method: 'POST',
