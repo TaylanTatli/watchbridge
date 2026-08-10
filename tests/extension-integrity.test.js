@@ -36,6 +36,13 @@ test('provider permission request remains the first operation in each generated 
   assert.doesNotMatch(source, /button\.addEventListener\('click', async \(\) => \{\s*chrome\.permissions\.request/);
 });
 
+test('stale service workers produce a reload action instead of an empty provider section', async () => {
+  const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
+  assert.match(source, /if \(!providers\.length\)/);
+  assert.match(source, /Reload WatchBridge/);
+  assert.match(source, /chrome\.runtime\.reload\(\)/);
+});
+
 test('every popup element referenced by ID exists in the HTML', async () => {
   const [source, html] = await Promise.all([
     readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8'),

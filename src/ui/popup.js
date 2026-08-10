@@ -127,8 +127,16 @@ function bindProviderControls() {
 function render(next) {
   state = next;
   const providerHost = $('providers');
-  if (!providerHost.contains(document.activeElement) || document.activeElement?.tagName === 'BUTTON') {
-    providerHost.innerHTML = (state.providers || []).map(providerMarkup).join('');
+  const providers = Array.isArray(state.providers) ? state.providers : [];
+  if (!providers.length) {
+    providerHost.innerHTML = `<div class="providerUpdate">
+      <strong>WatchBridge update pending</strong>
+      <small>The popup is newer than the running service worker. Reload once to activate provider controls and new optional permissions.</small>
+      <button id="reloadExtension" class="primary full">Reload WatchBridge</button>
+    </div>`;
+    providerHost.querySelector('#reloadExtension').addEventListener('click', () => chrome.runtime.reload());
+  } else if (!providerHost.contains(document.activeElement) || document.activeElement?.tagName === 'BUTTON') {
+    providerHost.innerHTML = providers.map(providerMarkup).join('');
     bindProviderControls();
   }
   $('interval').value = state.settings.intervalMinutes ?? 30;
@@ -161,7 +169,7 @@ function render(next) {
     badge.textContent = sync.phase === 'done' ? 'Done' : 'Idle';
   }
 
-  const runnable = (state.providers || []).some(provider => (
+  const runnable = providers.some(provider => (
     provider.settings?.enabled && provider.permissionGranted && provider.capabilities.historyBackfill
   ));
   $('syncNow').disabled = sync.running || !runnable || !state.simkl.connected;

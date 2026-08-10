@@ -25,6 +25,7 @@ async function getState() {
   )));
   const simklPermission = await chrome.permissions.contains({ origins: ['https://api.simkl.com/*'] });
   return {
+    protocolVersion: 2,
     settings,
     simkl: { clientId: simkl.clientId, connected: Boolean(simkl.accessToken) },
     oauthDraft,
