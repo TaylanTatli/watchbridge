@@ -149,7 +149,13 @@ test('queued Crunchyroll work survives serialized worker state', () => {
 test('Crunchyroll session token stays inside the ephemeral client session', async () => {
   const requests = [];
   const responses = [
-    { ok: true, status: 200, async text() { return '<script>accountAuthClientId:"web-client"</script>'; } },
+    {
+      ok: true,
+      status: 200,
+      url: 'https://www.crunchyroll.com/home/history',
+      // Crunchyroll ships dormant login UI strings even for authenticated pages.
+      async text() { return '<button>Log In</button><script>accountAuthClientId:"web-client"</script>'; }
+    },
     { ok: true, status: 200, async text() { return JSON.stringify({ access_token: 'private-session-token', account_id: 'account-1' }); } },
     { ok: true, status: 200, async text() { return JSON.stringify({ data: [{ profile_id: 'main', profile_name: 'Main', is_selected: true }] }); } }
   ];

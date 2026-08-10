@@ -106,7 +106,11 @@ export function createCrunchyrollClient(fetchImpl = fetch) {
       headers: { Accept: 'text/html' }
     }, 20000, fetchImpl);
     const html = await pageResponse.text();
-    if (pageResponse.status === 401 || /log in|login-form/i.test(html)) {
+    let redirectedToLogin = false;
+    try {
+      redirectedToLogin = /\/login\/?$/i.test(new URL(pageResponse.url).pathname);
+    } catch {}
+    if (pageResponse.status === 401 || redirectedToLogin) {
       throw new Error('Crunchyroll is not logged in in this browser profile.');
     }
     if (pageResponse.status === 403) {
@@ -129,6 +133,9 @@ export function createCrunchyrollClient(fetchImpl = fetch) {
         device_type: 'Chrome on Desktop'
       })
     }, 20000, fetchImpl);
+    if (tokenResponse.status === 401 || tokenResponse.status === 403) {
+      throw new Error(`Crunchyroll rejected the session token exchange (HTTP ${tokenResponse.status}). Refresh crunchyroll.com and try again.`);
+    }
     const tokenBody = await readResponse(tokenResponse);
     const accessToken = tokenBody.access_token;
     const accountId = tokenBody.account_id ?? tokenBody.accountId;
