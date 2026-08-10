@@ -14,7 +14,7 @@ export async function reconcileProviderDecorator(providerId) {
   const provider = getProvider(providerId);
   if (!provider.capabilities?.siteDecoration || !provider.siteAdapter) return;
   const settings = await getSettings();
-  const granted = await chrome.permissions.contains({ origins: [provider.permissionOrigin] });
+  const granted = await chrome.permissions.contains({ origins: provider.permissionOrigins || [provider.permissionOrigin] });
   const shouldRegister = granted && Boolean(settings.providers?.[providerId]?.dimWatched);
   const id = registrationId(providerId);
   const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });

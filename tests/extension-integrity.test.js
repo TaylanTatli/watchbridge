@@ -74,7 +74,7 @@ test('fresh settings are disabled and OAuth secret drafts stay session-only', as
     providers: {
       netflix: { enabled: false, threshold: 70, dimWatched: true },
       crunchyroll: { enabled: false, threshold: 70, dimWatched: true, profileId: '', profiles: [] },
-      primevideo: { enabled: false, dimWatched: false }
+      primevideo: { enabled: false, dimWatched: true }
     }
   });
 

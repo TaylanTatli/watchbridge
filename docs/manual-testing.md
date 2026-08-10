@@ -54,6 +54,9 @@ Netflix's permission request must remain directly tied to the user gesture. Do n
 8. Stop and restart the service worker with Prime events queued; confirm the persistent queue resumes.
 9. Test a catalog-unavailable history item: cached metadata should be reused, while a cache miss should become unmatched without localized-title guessing.
 10. Confirm REMOVE actions/tokens, cookies, and temporary metadata device IDs do not appear in storage or logs.
+11. Enable **Dim watched titles**, visit a Prime browse/history page, and confirm safely mapped watched cards are faded and grayscale.
+12. Hover a faded Prime card and confirm full color and opacity return.
+13. Confirm unmatched and previously unseen Prime cards remain unchanged.
 
 ## Synchronization and idempotency
 

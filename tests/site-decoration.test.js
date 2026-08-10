@@ -91,7 +91,7 @@ test('disabling decoration removes all WatchBridge visual state', async () => {
   assert.equal(watched.hasAttribute('data-watchbridge-state'), false);
 });
 
-test('Netflix and Crunchyroll adapters extract only stable URL identifiers', async () => {
+test('Netflix, Crunchyroll, and Prime Video adapters extract only stable URL identifiers', async () => {
   await import(`../src/site-adapters/netflix/content.js?test=${Date.now()}`);
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/browse?jbv=81234567'), { id: '81234567', kind: 'title' });
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/watch/81234567'), { id: '81234567', kind: 'episode' });
@@ -101,10 +101,16 @@ test('Netflix and Crunchyroll adapters extract only stable URL identifiers', asy
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/series/G6NQ5DWZ6/my-hero-academia'), { id: 'G6NQ5DWZ6', kind: 'title' });
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/watch/GWDU8JN2W/episode-1'), { id: 'GWDU8JN2W', kind: 'episode' });
   assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search?q=hero'), null);
+
+  await import(`../src/site-adapters/primevideo/content.js?test=${Date.now()}`);
+  assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/detail/0N0F0I1VSVSFT6K6MIE9K5XIRB?ref_=atv'), {
+    id: '0N0F0I1VSVSFT6K6MIE9K5XIRB', kind: 'title'
+  });
+  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search/ref=atv_nb_sr'), null);
 });
 
 test('decorator CSS fades watched art and hover restores opacity', async () => {
-  for (const file of ['netflix/content.css', 'crunchyroll/content.css']) {
+  for (const file of ['netflix/content.css', 'crunchyroll/content.css', 'primevideo/content.css']) {
     const css = await readFile(new URL(`../src/site-adapters/${file}`, import.meta.url), 'utf8');
     assert.match(css, /opacity:\s*0\.25/);
     assert.match(css, /filter:\s*grayscale\(1\)/);

@@ -122,7 +122,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'getWatchStates': {
           const provider = getProvider(message.provider);
-          if (!sender.tab?.url?.startsWith(provider.permissionOrigin.replace('*', ''))) {
+          const origins = provider.permissionOrigins || [provider.permissionOrigin];
+          if (!origins.some(origin => sender.tab?.url?.startsWith(origin.replace('*', '')))) {
             throw new Error('Watch-state request did not originate from the provider site.');
           }
           const result = await getWatchStates(provider.id, message.items);

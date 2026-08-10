@@ -1,5 +1,6 @@
 import { getSimkl, getWatchStateCache, saveWatchStateCache } from './storage.js';
 import { simklTarget } from '../targets/simkl/index.js';
+import { getProvider } from './provider-registry.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 5000;
@@ -40,8 +41,23 @@ export async function getWatchStates(provider, items, now = Date.now()) {
   }
 
   if (missing.length) {
-    for (let offset = 0; offset < missing.length; offset += MAX_BATCH_SIZE) {
-      const batch = missing.slice(offset, offset + MAX_BATCH_SIZE);
+    const definition = getProvider(provider);
+    const prepared = typeof definition.prepareWatchStateItems === 'function'
+      ? await definition.prepareWatchStateItems(missing)
+      : missing;
+    const remote = [];
+    for (const item of prepared) {
+      if (item.resolvable === false) {
+        const watched = Boolean(item.locallyCompleted);
+        states[`${item.id}:${item.kind}`] = watched;
+        cache[cacheKey(provider, item)] = { watched, resolved: watched, fetchedAt: now };
+      } else {
+        remote.push(item);
+      }
+    }
+
+    for (let offset = 0; offset < remote.length; offset += MAX_BATCH_SIZE) {
+      const batch = remote.slice(offset, offset + MAX_BATCH_SIZE);
       const results = await simklTarget.getWatchStates(batch, simkl);
       results.forEach((result, index) => {
         const item = batch[index];

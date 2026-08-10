@@ -95,7 +95,7 @@ function isGenuinelyWatched(item, result) {
   if (result?.result !== true) return false;
   // Simkl documents season + episode as the required specific-episode lookup.
   // A provider episode ID alone may resolve to its parent show, so never infer.
-  if (item.kind === 'episode') {
+  if ((item.mediaKind || item.kind) === 'episode') {
     return Boolean(item.season && item.episode && result.last_watched_at);
   }
   return result.list === 'completed';
@@ -106,10 +106,16 @@ export async function getWatchStates(items, credentials) {
   if (!Array.isArray(items) || !items.length) return [];
   const version = chrome.runtime.getManifest().version;
   const url = `${API}/sync/watched?app-name=watchbridge&app-version=${encodeURIComponent(version)}`;
-  const body = items.map(item => ({
-    ids: normalizeIds(item.ids),
-    ...(item.season && item.episode ? { season: item.season, episode: item.episode } : {})
-  }));
+  const body = items.map(item => {
+    const ids = normalizeIds(item.ids);
+    return {
+      ...(Object.keys(ids).length ? { ids } : {}),
+      ...(item.title ? { title: item.title } : {}),
+      ...(item.year ? { year: item.year } : {}),
+      ...(item.type ? { type: item.type } : {}),
+      ...(item.season && item.episode ? { season: item.season, episode: item.episode } : {})
+    };
+  });
   const results = await postJson(url, body, {
     Authorization: `Bearer ${credentials.accessToken}`,
     'simkl-api-key': credentials.clientId

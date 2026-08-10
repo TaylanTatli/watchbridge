@@ -23,7 +23,7 @@ The project is built around independent providers and targets. Streaming-site co
 - Persistent queue, retries, dead letters, and unmatched diagnostics
 - Stable-ID resolution before any title-based fallback
 - Correct per-season numbering for resolved Simkl anime
-- Optional watched-title dimming on Netflix and Crunchyroll
+- Optional watched-title dimming on Netflix, Crunchyroll, and safely mapped Prime Video cards
 - Per-provider optional host permissions
 - Manifest V3 service-worker recovery
 - Simkl OAuth with session-only secret drafts and redacted logs
@@ -34,7 +34,7 @@ The project is built around independent providers and targets. Streaming-site co
 |---|---|---|
 | Netflix | Provider | History backfill, incremental sync, site decoration |
 | Crunchyroll | Provider | History backfill, incremental sync, site decoration with episode limitations |
-| Prime Video | Provider | History backfill and incremental sync; no progress threshold or site decoration |
+| Prime Video | Provider | History backfill, incremental sync, and conditional site decoration; no progress threshold |
 | Simkl | Target | OAuth, history writes, identity resolution, authoritative watch-state lookup |
 
 Other streaming services are intentionally not exposed as placeholder providers. See [Future services](#future-services) for the current feasibility notes.
@@ -116,6 +116,8 @@ Site decorators are registered dynamically only when:
 Visible IDs are deduplicated and queried in batches. Simkl `/sync/watched` is the authoritative source; local completed keys alone do not classify remote watch state.
 
 WatchBridge does not dim plan-to-watch, watching, on-hold, dropped, unresolved, or unmatched titles. A remote episode lookup requires safe canonical season and episode coordinates, so bare provider episode URLs are not guessed.
+
+Prime decoration extracts stable `/detail/<id>` links and maps them through the persistent GTI metadata cache. Simkl IDs learned during successful resolution are preferred; exact title + year is used when both are available. A previously successful WatchBridge completion is a conservative fallback for older cached entries. Unknown, ambiguous, and unmatched Prime cards remain untouched.
 
 ## Architecture
 
@@ -225,7 +227,7 @@ src/
 - OAuth access tokens, client secrets, cookies, and authorization headers are recursively redacted from structured logs.
 - Crunchyroll session tokens and generated device IDs are not persisted.
 - Prime REMOVE actions, browser session data, and metadata-request device IDs are neither stored nor logged.
-- Prime's bounded metadata cache contains only canonical catalog fields keyed by GTI.
+- Prime's bounded metadata cache contains only canonical catalog fields and successfully resolved Simkl IDs keyed by GTI.
 - The popup never displays the raw Simkl Client ID after connection.
 - WatchBridge requests no permissions for unsupported streaming platforms.
 
@@ -238,6 +240,7 @@ src/
 - Playback scrobbling is not implemented; current providers import recorded history.
 - Prime titles removed from the catalog or unavailable in the current region use cached canonical metadata when present; otherwise they remain unmatched rather than being guessed from a localized title.
 - Prime title resolution requires one exact, type-compatible canonical Simkl result. Ambiguous titles remain unmatched, especially when a release year is unavailable.
+- Prime decoration is conditional: a card must expose a stable detail ID that maps to cached GTI metadata. Unseen catalog cards are not guessed from DOM text.
 - Live integration tests require signed-in provider sessions and personal Simkl OAuth credentials.
 
 ## Future services

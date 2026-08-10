@@ -3,7 +3,7 @@ import { getSettings, getSimkl, getSyncState, saveSyncState, saveProviderSetting
 import { compactWatchEvent, normalizeIds, watchEventKey } from './types.js';
 import { resolveForTarget } from './resolver.js';
 import { simklTarget } from '../targets/simkl/index.js';
-import { rememberSyncedWatch } from './watch-state.js';
+import { invalidateWatchStateCache, rememberSyncedWatch } from './watch-state.js';
 import { refreshDecoratedTabs } from './site-decoration.js';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -170,6 +170,10 @@ export async function syncProvider(providerId = 'netflix') {
           stats.sent++;
           syncedProviders.add(item.source);
           rememberCompleted(state, item.key);
+          const itemProvider = getProvider(item.source);
+          if (resolution.identity && typeof itemProvider.rememberResolvedIdentity === 'function') {
+            await itemProvider.rememberResolvedIdentity(item, resolution.identity);
+          }
           await rememberSyncedWatch(item.source, item.sourceId, item.type).catch(() => {});
           await addLog('info', `[Simkl] Synced ${item.source} ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
         } else {
@@ -227,6 +231,7 @@ export async function syncProvider(providerId = 'netflix') {
     await saveSyncState(state);
     await addLog('info', `[${provider.label}] Sync completed.`, state.lastStats);
     for (const syncedProviderId of syncedProviders) {
+      await invalidateWatchStateCache(syncedProviderId).catch(() => {});
       await refreshDecoratedTabs(syncedProviderId).catch(async error => {
         await addLog('warn', `[${provider.label}] Site decoration refresh failed.`, { error: error.message || String(error) });
       });

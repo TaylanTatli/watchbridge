@@ -1,5 +1,5 @@
 import { fetchWithTimeout } from '../../core/http.js';
-import { getPrimeMetadataCache, savePrimeMetadataCache } from '../../core/storage.js';
+import { getPrimeMetadataCache, getSyncState, savePrimeMetadataCache } from '../../core/storage.js';
 import { createWatchEvent } from '../../core/types.js';
 
 const ROOT = 'https://www.primevideo.com';
@@ -233,6 +233,54 @@ function pruneCache(cache) {
   return Object.fromEntries(entries.slice(0, MAX_CACHE_ENTRIES));
 }
 
+async function rememberResolvedIdentity(event, identity) {
+  const gti = String(event?.metadata?.primevideo?.gti || '').trim();
+  const simklId = Number(identity?.ids?.simkl);
+  if (!gti || !Number.isSafeInteger(simklId) || simklId <= 0) return;
+  const cache = await getPrimeMetadataCache();
+  if (!cache[gti]) return;
+  cache[gti] = { ...cache[gti], simklId, resolvedAt: Date.now() };
+  await savePrimeMetadataCache(pruneCache(cache));
+}
+
+async function prepareWatchStateItems(items) {
+  const [cache, sync] = await Promise.all([getPrimeMetadataCache(), getSyncState()]);
+  const byVisibleId = new Map();
+  for (const record of Object.values(cache)) {
+    for (const id of [record?.detailId, record?.gti]) {
+      if (id) byVisibleId.set(String(id), record);
+    }
+  }
+  const completedIds = new Set((Array.isArray(sync.completedKeys) ? sync.completedKeys : []).flatMap(key => {
+    if (!key.startsWith('primevideo:')) return [];
+    const timestampSeparator = key.lastIndexOf(':');
+    return timestampSeparator > 'primevideo:'.length
+      ? [key.slice('primevideo:'.length, timestampSeparator)]
+      : [];
+  }));
+  return items.map(item => {
+    const record = byVisibleId.get(item.id);
+    if (!record) return { ...item, ids: {}, resolvable: false };
+    const isEpisode = record.type === 'episode';
+    const simklId = Number(record.simklId);
+    const title = isEpisode ? record.seriesTitle : record.title;
+    const year = positiveInteger(record.year);
+    const locallyCompleted = Boolean(record.gti && completedIds.has(String(record.gti)));
+    return {
+      ...item,
+      ids: Number.isSafeInteger(simklId) && simklId > 0 ? { simkl: simklId } : {},
+      title: String(title || ''),
+      year,
+      type: isEpisode ? 'show' : 'movie',
+      season: isEpisode ? record.season : null,
+      episode: isEpisode ? record.episode : null,
+      mediaKind: isEpisode ? 'episode' : 'title',
+      locallyCompleted,
+      resolvable: (Number.isSafeInteger(simklId) && simklId > 0) || Boolean(title && year)
+    };
+  });
+}
+
 async function fetchEvents({ afterMs = 0, maxPages = 500, client = createPrimeVideoClient() } = {}) {
   const session = await client.openSession();
   const cache = await getPrimeMetadataCache();
@@ -296,12 +344,19 @@ export const primeVideoProvider = Object.freeze({
     'https://www.primevideo.com/*',
     'https://atv-ps-eu.primevideo.com/*'
   ]),
+  siteAdapter: Object.freeze({
+    matches: ['https://www.primevideo.com/*'],
+    js: ['src/site-adapters/primevideo/content.js', 'src/site-adapters/runtime.js'],
+    css: ['src/site-adapters/primevideo/content.css']
+  }),
   usesWatchedThreshold: false,
   capabilities: Object.freeze({
     historyBackfill: true,
     incrementalHistory: true,
     currentPlaybackScrobble: false,
-    siteDecoration: false
+    siteDecoration: true
   }),
-  fetchEvents
+  fetchEvents,
+  prepareWatchStateItems,
+  rememberResolvedIdentity
 });
