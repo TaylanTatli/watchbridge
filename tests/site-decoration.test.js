@@ -148,6 +148,12 @@ test('decorator CSS fades watched art and hover restores opacity', async () => {
   }
 });
 
+test('Prime hover restoration follows the replaceable card, not its persistent carousel item', async () => {
+  const css = await readFile(new URL('../src/site-adapters/primevideo/content.css', import.meta.url), 'utf8');
+  assert.match(css, /\[data-watchbridge-state="watched"\]\s*>\s*article\[data-testid="card"\]:hover img/);
+  assert.doesNotMatch(css, /^\[data-watchbridge-state="watched"\]:hover img/m);
+});
+
 test('uniqueCards keeps different episode/title meanings separate', () => {
   const cards = uniqueCards([
     { id: 'same', kind: 'title', element: element() },

@@ -4,7 +4,8 @@
   transition: opacity 160ms ease, filter 160ms ease;
 }
 
-[data-watchbridge-state="watched"]:hover img {
+article[data-watchbridge-state="watched"]:hover img,
+[data-watchbridge-state="watched"] > article[data-testid="card"]:hover img {
   opacity: 1;
   filter: grayscale(0);
 }
