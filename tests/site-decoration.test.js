@@ -81,11 +81,11 @@ test('watch state is applied to replacement cards created during an async lookup
   const replacement = element();
   let activeElement = original;
   const controller = createController({
-    provider: 'primevideo',
-    scan: () => [{ id: 'DETAIL', kind: 'title', element: activeElement }],
+    provider: 'netflix',
+    scan: () => [{ id: '81234567', kind: 'title', element: activeElement }],
     sendMessage: async () => {
       activeElement = replacement;
-      return { ok: true, connected: true, states: { 'DETAIL:title': true } };
+      return { ok: true, connected: true, states: { '81234567:title': true } };
     },
     documentRef: { body: {}, querySelectorAll: () => [activeElement] },
     MutationObserverImpl: FakeObserver
@@ -109,7 +109,7 @@ test('disabling decoration removes all WatchBridge visual state', async () => {
   assert.equal(watched.hasAttribute('data-watchbridge-state'), false);
 });
 
-test('Netflix, Crunchyroll, and Prime Video adapters extract only stable URL identifiers', async () => {
+test('Netflix and Crunchyroll adapters extract only stable URL identifiers', async () => {
   await import(`../src/site-adapters/netflix/content.js?test=${Date.now()}`);
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/browse?jbv=81234567'), { id: '81234567', kind: 'title' });
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/watch/81234567'), { id: '81234567', kind: 'episode' });
@@ -119,26 +119,10 @@ test('Netflix, Crunchyroll, and Prime Video adapters extract only stable URL ide
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/series/G6NQ5DWZ6/my-hero-academia'), { id: 'G6NQ5DWZ6', kind: 'title' });
   assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/watch/GWDU8JN2W/episode-1'), { id: 'GWDU8JN2W', kind: 'episode' });
   assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search?q=hero'), null);
-
-  await import(`../src/site-adapters/primevideo/content.js?test=${Date.now()}`);
-  assert.deepEqual(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/detail/0N0F0I1VSVSFT6K6MIE9K5XIRB?ref_=atv'), {
-    id: '0N0F0I1VSVSFT6K6MIE9K5XIRB', kind: 'title'
-  });
-  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.identityFromHref('/search/ref=atv_nb_sr'), null);
-  const primeItem = element();
-  const primeCard = { closest(selector) {
-    assert.equal(selector, 'li[data-index]');
-    return primeItem;
-  } };
-  const primeAnchor = { closest(selector) {
-    assert.equal(selector, 'article[data-testid="card"], [data-testid="card"][data-card-title]');
-    return primeCard;
-  } };
-  assert.equal(globalThis.WatchBridgeSiteAdapterConfig.cardElement(primeAnchor), primeItem);
 });
 
 test('decorator CSS fades watched art and hover restores opacity', async () => {
-  for (const file of ['netflix/content.css', 'crunchyroll/content.css', 'primevideo/content.css']) {
+  for (const file of ['netflix/content.css', 'crunchyroll/content.css']) {
     const css = await readFile(new URL(`../src/site-adapters/${file}`, import.meta.url), 'utf8');
     assert.match(css, /opacity:\s*0\.25/);
     assert.match(css, /filter:\s*grayscale\(1\)/);
@@ -146,12 +130,6 @@ test('decorator CSS fades watched art and hover restores opacity', async () => {
     assert.match(css, /:hover img\s*\{[^}]*filter:\s*grayscale\(0\)/s);
     assert.doesNotMatch(css, /!important/);
   }
-});
-
-test('Prime hover restoration follows the replaceable card, not its persistent carousel item', async () => {
-  const css = await readFile(new URL('../src/site-adapters/primevideo/content.css', import.meta.url), 'utf8');
-  assert.match(css, /\[data-watchbridge-state="watched"\]\s*>\s*article\[data-testid="card"\]:hover img/);
-  assert.doesNotMatch(css, /^\[data-watchbridge-state="watched"\]:hover img/m);
 });
 
 test('uniqueCards keeps different episode/title meanings separate', () => {

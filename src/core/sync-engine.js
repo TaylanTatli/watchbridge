@@ -170,10 +170,6 @@ export async function syncProvider(providerId = 'netflix') {
           stats.sent++;
           syncedProviders.add(item.source);
           rememberCompleted(state, item.key);
-          const itemProvider = getProvider(item.source);
-          if (resolution.identity && typeof itemProvider.rememberResolvedIdentity === 'function') {
-            await itemProvider.rememberResolvedIdentity(item, resolution.identity);
-          }
           await rememberSyncedWatch(item.source, item.sourceId, item.type).catch(() => {});
           await addLog('info', `[Simkl] Synced ${item.source} ${item.type}: ${item.seriesTitle || item.title}`, { key: item.key });
         } else {

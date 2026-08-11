@@ -25,9 +25,10 @@ test('provider capabilities represent Netflix, Crunchyroll, and Prime Video hone
     historyBackfill: true,
     incrementalHistory: true,
     currentPlaybackScrobble: false,
-    siteDecoration: true
+    siteDecoration: false
   });
   assert.equal(providers.primevideo.usesWatchedThreshold, false);
+  assert.equal(providers.primevideo.siteAdapter, null);
 });
 
 test('Netflix, Crunchyroll, and Prime Video can be enabled independently', async () => {
@@ -83,11 +84,6 @@ test('decorator registration restores after worker startup and unregisters on re
   assert.equal(registered.length, 0);
   assert.equal(tabMessages.at(-1).message.type, 'watchbridgeDecorationDisabled');
 
-  granted = true;
-  await storage.saveProviderSettings('primevideo', { dimWatched: true });
-  await decoration.reconcileProviderDecorator('primevideo');
-  assert.deepEqual(registered[0].js, ['src/site-adapters/primevideo/content.js', 'src/site-adapters/runtime.js']);
-  granted = false;
   await decoration.reconcileProviderDecorator('primevideo');
   assert.equal(registered.length, 0);
 });

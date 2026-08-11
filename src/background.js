@@ -90,7 +90,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const provider = getProvider(message.provider);
           const patch = {};
           if (message.patch?.enabled !== undefined) patch.enabled = Boolean(message.patch.enabled);
-          if (message.patch?.dimWatched !== undefined) patch.dimWatched = Boolean(message.patch.dimWatched);
+          if (message.patch?.dimWatched !== undefined && provider.capabilities.siteDecoration) {
+            patch.dimWatched = Boolean(message.patch.dimWatched);
+          }
           if (message.patch?.threshold !== undefined) {
             patch.threshold = Math.min(100, Math.max(1, Number(message.patch.threshold || 70)));
           }

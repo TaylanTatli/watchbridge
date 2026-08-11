@@ -253,15 +253,3 @@ test('Prime session bootstrap reads embedded first-page history and detects logi
   }));
   await assert.rejects(loggedOut.openSession(), /not logged in/);
 });
-
-test('Prime persists a resolved Simkl identity for authoritative site decoration', async () => {
-  const local = storageArea({
-    'watchbridge.primeMetadataCache': { 'amzn1.dv.gti.movie': movieCatalog() }
-  });
-  globalThis.chrome = { storage: { local, session: storageArea() } };
-  const event = normalizePrimeHistoryItem(movie(), movieCatalog());
-  await primeVideoProvider.rememberResolvedIdentity(event, { ids: { simkl: 472214 } });
-  const cached = local.values.get('watchbridge.primeMetadataCache')['amzn1.dv.gti.movie'];
-  assert.equal(cached.simklId, 472214);
-  assert.ok(cached.resolvedAt > 0);
-});
