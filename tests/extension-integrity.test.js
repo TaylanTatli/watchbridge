@@ -55,6 +55,17 @@ test('popup errors use an inline readable notice instead of clipped browser aler
   assert.match(html, /id="notice"[^>]*aria-live="polite"/);
 });
 
+test('popup renders stored UTC log timestamps in the browser local time', async () => {
+  const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
+  assert.match(source, /<time>\$\{escapeHtml\(formatTime\(log\.at\)\)\}<\/time>/);
+  assert.doesNotMatch(source, /log\.at\.slice\(0,19\)/);
+});
+
+test('provider failure logs include the safe error reason', async () => {
+  const source = await readFile(new URL('../src/core/sync-engine.js', import.meta.url), 'utf8');
+  assert.match(source, /Sync failed: \$\{state\.lastError\}/);
+});
+
 test('provider cards keep advanced controls collapsed without losing polling state', async () => {
   const source = await readFile(new URL('../src/ui/popup.js', import.meta.url), 'utf8');
   assert.match(source, /const expandedProviders = new Set\(\)/);
@@ -103,7 +114,10 @@ test('structured log data redacts token and secret fields', async () => {
   const storage = await import('../src/core/storage.js');
   await storage.addLog('info', '[WatchBridge] test', {
     accessToken: 'must-not-survive',
-    nested: { clientSecret: 'must-not-survive', sessionCookie: 'must-not-survive' },
+    nested: {
+      clientSecret: 'must-not-survive',
+      sessionCookie: 'must-not-survive'
+    },
     actions: { REMOVE: { query: { titleIds: 'must-not-survive' } } },
     safe: 'visible'
   });

@@ -32,7 +32,7 @@ async function fetchProgress(ids) {
   if (!ids.length) return {};
   const raw = await postFormJson(PROGRESS_ENDPOINT, {
     path: JSON.stringify(['videos', ids.map(String), [
-      'summary', 'runtime', 'bookmarkPosition', 'seasonNumber', 'episodeNumber'
+      'summary', 'runtime', 'bookmarkPosition'
     ]])
   });
 

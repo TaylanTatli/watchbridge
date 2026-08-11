@@ -239,7 +239,7 @@ export async function syncProvider(providerId = 'netflix') {
     state.lastStats = { ...stats, finishedAt: new Date().toISOString() };
     await saveSyncState(state);
     const label = (() => { try { return getProvider(providerId).label; } catch { return providerId; } })();
-    await addLog('error', `[${label}] Sync failed.`, { error: state.lastError });
+    await addLog('error', `[${label}] Sync failed: ${state.lastError}`, { error: state.lastError });
   } finally {
     state = await getSyncState();
     state.running = false;

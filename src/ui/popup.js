@@ -230,7 +230,7 @@ function render(next) {
   if (sync.lastError) $('stats').innerHTML += `<div class="log error">${escapeHtml(sync.lastError)}</div>`;
 
   $('logs').innerHTML = (state.logs || []).slice(0, 30).map(log =>
-    `<div class="log ${log.level || ''}"><time>${escapeHtml(log.at.slice(0,19).replace('T',' '))}</time> ${escapeHtml(log.message)}</div>`
+    `<div class="log ${log.level || ''}"><time>${escapeHtml(formatTime(log.at))}</time> ${escapeHtml(log.message)}</div>`
   ).join('') || '<div class="log">No logs.</div>';
 
   $('footer').textContent = `v${chrome.runtime.getManifest().version} · ${state.extensionId}`;
